@@ -47,8 +47,9 @@ function createAnnotationTag(entries: AnnotationEntry[]) {
         'Type': 0,
         'Fill': 1,
         'Text Color': 2,
-        'Stroke Color': 3,
-        'State': 4
+        'Text Stroke Color': 3,
+        'Stroke Color': 4,
+        'State': 5
     };
 
     // Sort entries
@@ -315,8 +316,8 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
                                             const variable = await figma.variables.getVariableByIdAsync(v.id);
                                             if (variable) {
                                                 localEntries.push({
-                                                    label: 'Stroke Color',
-                                                    text: `Stroke Color: ${variable.name}`,
+                                                    label: 'Text Stroke Color',
+                                                    text: `Text Stroke Color: ${variable.name}`,
                                                     color: { r: 0.2, g: 0.6, b: 1 },
                                                     type: 'color'
                                                 });
@@ -333,8 +334,8 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
                                 const style = figma.getStyleById(child.strokeStyleId);
                                 if (style) {
                                     localEntries.push({
-                                        label: 'Stroke Color',
-                                        text: `Stroke Color: ${style.name}`,
+                                        label: 'Text Stroke Color',
+                                        text: `Text Stroke Color: ${style.name}`,
                                         color: { r: 0.2, g: 0.6, b: 1 },
                                         type: 'color'
                                     });
