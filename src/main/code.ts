@@ -11,7 +11,7 @@ interface AnnotationEntry {
     label: string;
     text: string;
     color: RGB;
-    type: 'color' | 'typography' | 'state';
+    type: 'color' | 'typography' | 'state' | 'radius' | 'effect';
 }
 
 interface AnnotationData {
@@ -49,7 +49,9 @@ function createAnnotationTag(entries: AnnotationEntry[]) {
         'Text Color': 2,
         'Text Stroke Color': 3,
         'Stroke Color': 4,
-        'State': 5
+        'Corner Radius': 5,
+        'Drop Shadow': 6,
+        'State': 7
     };
 
     // Sort entries
@@ -232,6 +234,32 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
                         type: 'state'
                     });
                 }
+            }
+        }
+    }
+
+    // 4. CORNER RADIUS
+    if ('cornerRadius' in node) {
+        if (node.cornerRadius !== figma.mixed && typeof node.cornerRadius === 'number' && node.cornerRadius > 0) {
+            localEntries.push({
+                label: 'Corner Radius',
+                text: `Radius: ${node.cornerRadius}`,
+                color: { r: 0.2, g: 0.8, b: 0.4 }, // Greenish
+                type: 'radius'
+            });
+        }
+    }
+
+    // 5. EFFECTS (Drop Shadow)
+    if ('effects' in node && (node.effects as any[]).length > 0) {
+        for (const effect of node.effects) {
+            if (effect.type === 'DROP_SHADOW' && effect.visible) {
+                localEntries.push({
+                    label: 'Drop Shadow',
+                    text: `Drop Shadow: X=${effect.offset.x} Y=${effect.offset.y} B=${effect.radius}`,
+                    color: { r: 0.6, g: 0.4, b: 0.8 }, // Purple-ish
+                    type: 'effect'
+                });
             }
         }
     }
