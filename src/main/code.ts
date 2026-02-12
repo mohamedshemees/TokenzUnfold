@@ -44,23 +44,51 @@ function rgbToHex(r: number, g: number, b: number): string {
 }
 
 // Helper: Create an annotation tag
-function createAnnotationTag(entries: AnnotationEntry[]) {
-    const frame = figma.createFrame();
-    frame.name = "Tag Group";
-    frame.layoutMode = "VERTICAL";
-    frame.primaryAxisSizingMode = "AUTO";
-    frame.counterAxisSizingMode = "AUTO";
-    frame.paddingLeft = 8;
-    frame.paddingRight = 8;
-    frame.paddingTop = 6;
-    frame.paddingBottom = 6;
-    frame.cornerRadius = 4;
-    frame.itemSpacing = 4;
+const createAnnotationTag = (entries: AnnotationEntry[], nodeName: string) => {
+    // 1. Container (Vertical)
+    const container = figma.createFrame();
+    container.name = "Annotation Tag"; // Name for layer list
+    container.layoutMode = "VERTICAL";
+    container.counterAxisSizingMode = "AUTO";
+    container.primaryAxisSizingMode = "AUTO";
+    container.itemSpacing = 0; // Tight spacing between notch and body
+    container.fills = []; // Transparent
 
-    // Warm dark background (Dark Brown-Grey)
-    frame.fills = [{ type: 'SOLID', color: { r: 0.18, g: 0.16, b: 0.15 } }];
-    frame.strokes = [{ type: 'SOLID', color: { r: 0.28, g: 0.26, b: 0.25 } }]; // Subtle border
-    frame.strokeWeight = 1;
+    // 2. Header (The Notch)
+    const header = figma.createFrame();
+    header.name = "Header";
+    header.layoutMode = "HORIZONTAL";
+    header.counterAxisSizingMode = "AUTO";
+    header.primaryAxisSizingMode = "AUTO";
+    header.paddingLeft = 8;
+    header.paddingRight = 8;
+    header.paddingTop = 4;
+    header.paddingBottom = 4;
+    header.cornerRadius = 4;
+    header.fills = [{ type: 'SOLID', color: { r: 0.2, g: 0.2, b: 0.2 } }]; // Dark Grey
+
+    const headerText = figma.createText();
+    headerText.characters = nodeName;
+    headerText.fontSize = 10;
+    headerText.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }]; // White
+    header.appendChild(headerText);
+
+    // 3. Body (The Properties)
+    const body = figma.createFrame();
+    body.name = "Body";
+    body.layoutMode = "VERTICAL";
+    body.counterAxisSizingMode = "AUTO";
+    body.primaryAxisSizingMode = "AUTO";
+    body.paddingLeft = 12;
+    body.paddingRight = 12;
+    body.paddingTop = 12;
+    body.paddingBottom = 12;
+    body.itemSpacing = 8;
+    body.cornerRadius = 8;
+
+    body.fills = [{ type: 'SOLID', color: { r: 0.13, g: 0.11, b: 0.1 } }];
+    body.strokes = [{ type: 'SOLID', color: { r: 0.3, g: 0.3, b: 0.3 } }];
+    body.strokeWeight = 1;
 
     // Define Order Priority
     const priority: { [key: string]: number } = {
@@ -75,7 +103,6 @@ function createAnnotationTag(entries: AnnotationEntry[]) {
         'State': 7
     };
 
-    // Sort entries
     const sortedEntries = [...entries].sort((a, b) => {
         const pA = priority[a.label] !== undefined ? priority[a.label] : 99;
         const pB = priority[b.label] !== undefined ? priority[b.label] : 99;
@@ -96,33 +123,38 @@ function createAnnotationTag(entries: AnnotationEntry[]) {
         dot.fills = [{ type: 'SOLID', color: entry.color }];
         row.appendChild(dot);
 
-        // Text with mixed styling
+        // Text
         const textNode = figma.createText();
         const fullText = `${entry.prefix}: ${entry.content}`;
         textNode.characters = fullText;
         textNode.fontSize = 11;
 
-        // Default color (Content) - Off-White
+        // Default color 
         textNode.fills = [{ type: 'SOLID', color: { r: 0.9, g: 0.9, b: 0.9 } }];
 
-        // Style the Prefix (Warm Gold/Orange)
-        const prefixEnd = entry.prefix.length + 1; // Include the colon? User said "Type : label"
-        // Let's color the prefix (e.g. "Fill")
-        // Gold: #FFC107 -> {r: 1, g: 0.76, b: 0.03}
-        // Or a softer warm orange: #FFB74D -> {r: 1, g: 0.72, b: 0.3}
+        // Style the Prefix 
         textNode.setRangeFills(0, entry.prefix.length, [{ type: 'SOLID', color: { r: 1, g: 0.72, b: 0.3 } }]);
 
-        // Ensure bold or medium for prefix?
-        textNode.setRangeFontName(0, entry.prefix.length, { family: "Inter", style: "Medium" });
-        textNode.setRangeFontName(prefixEnd, fullText.length, { family: "Inter", style: "Regular" });
+        // Font Styles (Assuming Inter available, or fallback)
+        // Note: Ideally we load these fonts before using setRangeFontName to avoid errors.
+        // Assuming user has these fonts or Figma defaults work. If safety needed, wrap in try/catch or check.
+        try {
+            textNode.setRangeFontName(0, entry.prefix.length, { family: "Inter", style: "Medium" });
+            textNode.setRangeFontName(entry.prefix.length + 1, fullText.length, { family: "Inter", style: "Regular" });
+        } catch (e) { /* ignore font errors */ }
 
         row.appendChild(textNode);
-        frame.appendChild(row);
+        body.appendChild(row);
     }
 
-    return frame;
-}
+    // Assemble: Header then Body
+    // To create the "Notch" look, maybe the header sits on top left?
+    // Vertical layout does exactly that.
+    container.appendChild(header);
+    container.appendChild(body);
 
+    return container;
+};
 // Helper: Check collision between two boxes
 function checkCollision(box1: Box, box2: Box, padding: number = 0): boolean {
     return (
@@ -170,9 +202,11 @@ function getBoundingBox(nodes: SceneNode[]): Box {
 // Recursive traversal to Collect Data
 async function collectAnnotations(node: SceneNode, options: AnnotationOptions, collected: AnnotationData[], ignoredIds: Set<string>) {
     if (ignoredIds.has(node.id)) return;
+    if ('visible' in node && !node.visible) return; // IGNORE HIDDEN ELEMENTS per user request
     // console.log("Processing node:", node.name, node.type);
 
     const localEntries: AnnotationEntry[] = [];
+    const involvedNodes: SceneNode[] = [node];
 
     // 1. COLORS (Variables & Styles & Explicit)
     if (options.annotateColors) {
@@ -456,129 +490,12 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
         }
     }
 
-    // 4. GROUP CHILD TEXT NODES
-    if ('children' in node) {
-        for (const child of node.children) {
-            if (child.type === 'TEXT' && !ignoredIds.has(child.id)) {
-                // Typography
-                if (options.annotateTypography) {
-                    if (child.textStyleId && typeof child.textStyleId === 'string') {
-                        try {
-                            const style = figma.getStyleById(child.textStyleId);
-                            if (style) {
-                                localEntries.push({
-                                    label: 'Type',
-                                    prefix: 'Type',
-                                    content: style.name,
-                                    color: { r: 0.6, g: 0.2, b: 0.8 },
-                                    type: 'typography'
-                                });
-                            }
-                        } catch (e) { console.error("Error getting child text style:", e); }
-                    }
-                }
-
-                // Text Color (Fill)
-                if (options.annotateColors) {
-                    if ('fills' in child && (child.fills as Paint[]).length > 0) {
-                        // Variables
-                        // @ts-ignore
-                        const boundVariables = child.boundVariables;
-                        if (boundVariables && boundVariables['fills']) {
-                            const fillsVar = boundVariables['fills'];
-                            if (Array.isArray(fillsVar)) {
-                                for (const v of fillsVar) {
-                                    if (v.id) {
-                                        try {
-                                            const variable = await figma.variables.getVariableByIdAsync(v.id);
-                                            if (variable) {
-                                                localEntries.push({
-                                                    label: 'Text Color',
-                                                    prefix: 'Text Color',
-                                                    content: variable.name,
-                                                    color: { r: 0.2, g: 0.6, b: 1 },
-                                                    type: 'color'
-                                                });
-                                            }
-                                        } catch (e) { console.error("Error getting child text fill var:", e); }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Style
-                        if ('fillStyleId' in child && child.fillStyleId && typeof child.fillStyleId === 'string') {
-                            try {
-                                const style = figma.getStyleById(child.fillStyleId);
-                                if (style) {
-                                    localEntries.push({
-                                        label: 'Text Color',
-                                        prefix: 'Text Color',
-                                        content: style.name,
-                                        color: { r: 0.2, g: 0.6, b: 1 },
-                                        type: 'color'
-                                    });
-                                }
-                            } catch (e) { console.error("Error getting child text fill style:", e); }
-                        }
-                    }
-                }
-
-                // Text Stroke (Variables & Styles)
-                if (options.annotateColors) {
-                    if ('strokes' in child && (child.strokes as Paint[]).length > 0) {
-                        // Variables
-                        // @ts-ignore
-                        const boundVariables = child.boundVariables;
-                        if (boundVariables && boundVariables['strokes']) {
-                            const strokesVar = boundVariables['strokes'];
-                            if (Array.isArray(strokesVar)) {
-                                for (const v of strokesVar) {
-                                    if (v.id) {
-                                        try {
-                                            const variable = await figma.variables.getVariableByIdAsync(v.id);
-                                            if (variable) {
-                                                localEntries.push({
-                                                    label: 'Text Stroke Color',
-                                                    prefix: 'Text Stroke',
-                                                    content: variable.name,
-                                                    color: { r: 0.2, g: 0.6, b: 1 },
-                                                    type: 'color'
-                                                });
-                                            }
-                                        } catch (e) { console.error("Error getting child text stroke var:", e); }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Style
-                        if ('strokeStyleId' in child && child.strokeStyleId && typeof child.strokeStyleId === 'string') {
-                            try {
-                                const style = figma.getStyleById(child.strokeStyleId);
-                                if (style) {
-                                    localEntries.push({
-                                        label: 'Text Stroke Color',
-                                        prefix: 'Text Stroke',
-                                        content: style.name,
-                                        color: { r: 0.2, g: 0.6, b: 1 },
-                                        type: 'color'
-                                    });
-                                }
-                            } catch (e) { console.error("Error getting child text stroke style:", e); }
-                        }
-                    }
-                }
-
-                // Mark child as handled
-                ignoredIds.add(child.id);
-            }
-        }
-    }
+    // 4. GROUP CHILD TEXT NODES - REMOVED per user request for separate tags
+    // Child text nodes will be processed recursively as independent nodes.
 
     if (localEntries.length > 0) {
         collected.push({
-            nodes: [node], // Start with single node
+            nodes: involvedNodes, // Include parent and any collected text children
             entries: localEntries
         });
     }
@@ -639,7 +556,7 @@ figma.ui.onmessage = async (msg) => {
                 const deduplicatedData = Array.from(uniqueAnnotationsMap.values());
                 console.log("Collected items (unique):", deduplicatedData.length);
 
-                const nodesToGroup: SceneNode[] = [];
+                // const nodesToGroup: SceneNode[] = []; // Replaced by tagsList and linesList for layering
 
                 // Layout Config
                 const PADDING = 60; // Distance from content bounding box to start of tags
@@ -736,13 +653,16 @@ figma.ui.onmessage = async (msg) => {
                     return placedTagsBoxes.some(placedBox => checkCollision(testBox, placedBox, COLLISION_PADDING));
                 };
 
+                const tagsList: SceneNode[] = [];
+                const linesList: SceneNode[] = [];
+
                 // --- RIGHT EDGE ---
                 sortAnnotations(right, 'y'); // Sort Top-to-Bottom
 
                 const startX_Right = frameAbsX + frameWidth + PADDING;
 
                 for (const data of right) {
-                    const tag = createAnnotationTag(data.entries);
+                    const tag = createAnnotationTag(data.entries, data.nodes[0].name);
                     const tagBoxBox = getBoundingBox(data.nodes);
                     const nodeCenterY = tagBoxBox.y + (tagBoxBox.height / 2);
 
@@ -812,13 +732,13 @@ figma.ui.onmessage = async (msg) => {
                         placedTagsBoxes.push({ x: currentColumnX, y: idealY, width: tag.width, height: tag.height });
                     }
 
-                    nodesToGroup.push(tag);
+                    tagsList.push(tag);
 
                     const tagAnchorX = tag.x;
                     const tagAnchorY = tag.y + (tag.height / 2);
                     const connectorColor = getConnectorColor(data);
 
-                    drawSmartConnector(data.nodes, tagAnchorX, tagAnchorY, connectorColor, nodesToGroup, 'RIGHT');
+                    drawSmartConnector(data.nodes, tagAnchorX, tagAnchorY, connectorColor, linesList, 'RIGHT');
                 }
 
                 // --- LEFT EDGE ---
@@ -827,7 +747,7 @@ figma.ui.onmessage = async (msg) => {
                 const startX_Left = frameAbsX - PADDING;
 
                 for (const data of left) {
-                    const tag = createAnnotationTag(data.entries);
+                    const tag = createAnnotationTag(data.entries, data.nodes[0].name);
                     const tagBoxBox = getBoundingBox(data.nodes);
                     const nodeCenterY = tagBoxBox.y + (tagBoxBox.height / 2);
 
@@ -884,13 +804,13 @@ figma.ui.onmessage = async (msg) => {
                         placedTagsBoxes.push({ x: currentColumnX, y: idealY, width: tag.width, height: tag.height });
                     }
 
-                    nodesToGroup.push(tag);
+                    tagsList.push(tag);
 
                     const tagAnchorX = tag.x + tag.width;
                     const tagAnchorY = tag.y + (tag.height / 2);
                     const connectorColor = getConnectorColor(data);
 
-                    drawSmartConnector(data.nodes, tagAnchorX, tagAnchorY, connectorColor, nodesToGroup, 'LEFT');
+                    drawSmartConnector(data.nodes, tagAnchorX, tagAnchorY, connectorColor, linesList, 'LEFT');
                 }
 
                 // --- TOP EDGE ---
@@ -899,7 +819,7 @@ figma.ui.onmessage = async (msg) => {
                 const startY_Top_Real = frameAbsY - PADDING;
 
                 for (const data of top) {
-                    const tag = createAnnotationTag(data.entries);
+                    const tag = createAnnotationTag(data.entries, data.nodes[0].name);
                     const box = getBoundingBox(data.nodes);
                     const centerX = box.x + box.width / 2;
 
@@ -920,7 +840,7 @@ figma.ui.onmessage = async (msg) => {
 
                     tag.x = idealX;
                     tag.y = yPos;
-                    nodesToGroup.push(tag);
+                    tagsList.push(tag);
 
                     placedTagsBoxes.push(testBox);
 
@@ -928,7 +848,7 @@ figma.ui.onmessage = async (msg) => {
                     const tagAnchorY = tag.y + tag.height;
                     const connectorColor = getConnectorColor(data);
 
-                    drawSmartConnector(data.nodes, tagAnchorX, tagAnchorY, connectorColor, nodesToGroup, 'TOP');
+                    drawSmartConnector(data.nodes, tagAnchorX, tagAnchorY, connectorColor, linesList, 'TOP');
                 }
 
 
@@ -938,7 +858,7 @@ figma.ui.onmessage = async (msg) => {
                 const startY_Bottom = frameAbsY + frameHeight + PADDING;
 
                 for (const data of bottom) {
-                    const tag = createAnnotationTag(data.entries);
+                    const tag = createAnnotationTag(data.entries, data.nodes[0].name);
                     const box = getBoundingBox(data.nodes);
                     const centerX = box.x + box.width / 2;
 
@@ -957,7 +877,7 @@ figma.ui.onmessage = async (msg) => {
 
                     tag.x = idealX;
                     tag.y = yPos;
-                    nodesToGroup.push(tag);
+                    tagsList.push(tag);
 
                     placedTagsBoxes.push(testBox);
 
@@ -965,10 +885,24 @@ figma.ui.onmessage = async (msg) => {
                     const tagAnchorY = tag.y;
                     const connectorColor = getConnectorColor(data);
 
-                    drawSmartConnector(data.nodes, tagAnchorX, tagAnchorY, connectorColor, nodesToGroup, 'BOTTOM');
+                    drawSmartConnector(data.nodes, tagAnchorX, tagAnchorY, connectorColor, linesList, 'BOTTOM');
                 }
-                if (nodesToGroup.length > 0) {
-                    const group = figma.group(nodesToGroup, figma.currentPage);
+
+                // Grouping Logic: Ensure Lines are BEHIND Tags
+                // In Figma Group, usually order is preserved.
+                // To have Tags on Top, they should be LAST in the children array?
+                // Wait, Figma renders first element at bottom? No, first element at Top usually in Layer list, but rendering is...
+                // Actually, let's verify. `appendChild` adds to top.
+                // `target.appendChild(a); target.appendChild(b);` => b is on top of a.
+                // So if we group `[line, tag]`, then line is bottom, tag is top?
+                // `figma.group(nodes)` uses the provided nodes.
+                // Let's assume standard append behavior: Later elements obscure earlier elements.
+                // So: [...linesList, ...tagsList] -> Lines first (bottom), Tags last (top).
+
+                const finalNodes = [...linesList, ...tagsList];
+
+                if (finalNodes.length > 0) {
+                    const group = figma.group(finalNodes, figma.currentPage);
                     group.name = "Annotations - " + rootNode.name;
                 }
             }
