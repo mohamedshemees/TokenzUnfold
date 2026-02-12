@@ -254,9 +254,19 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
     if ('effects' in node && (node.effects as any[]).length > 0) {
         for (const effect of node.effects) {
             if (effect.type === 'DROP_SHADOW' && effect.visible) {
+                // Extract color (with alpha)
+                const r = Math.round(effect.color.r * 255);
+                const g = Math.round(effect.color.g * 255);
+                const b = Math.round(effect.color.b * 255);
+                const a = effect.color.a !== undefined ? effect.color.a.toFixed(2) : '1.00';
+                const colorStr = `rgba(${r},${g},${b},${a})`;
+
+                // Spread radius (if available)
+                const spread = effect.spread !== undefined ? effect.spread : 0;
+
                 localEntries.push({
                     label: 'Drop Shadow',
-                    text: `Drop Shadow: X=${effect.offset.x} Y=${effect.offset.y} B=${effect.radius}`,
+                    text: `Drop Shadow: X=${effect.offset.x} Y=${effect.offset.y} B=${effect.radius} S=${spread} C=${colorStr}`,
                     color: { r: 0.6, g: 0.4, b: 0.8 }, // Purple-ish
                     type: 'effect'
                 });
