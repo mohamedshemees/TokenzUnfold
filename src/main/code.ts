@@ -27,6 +27,59 @@ interface Box {
     height: number;
 }
 
+// Theme Definitions
+interface ThemeColors {
+    containerFill: RGB;
+    containerStroke: RGB;
+    headerFill: RGB;
+    headerText: RGB;
+    bodyFill: RGB;
+    bodyStroke: RGB;
+    textPrimary: RGB;
+    textSecondary: RGB;
+    prefix: RGB;
+    connector: RGB;
+}
+
+const THEMES: { [key: string]: ThemeColors } = {
+    'dark': {
+        containerFill: { r: 0.13, g: 0.11, b: 0.1 }, // Brownish Dark
+        containerStroke: { r: 0.3, g: 0.3, b: 0.3 },
+        headerFill: { r: 0.2, g: 0.2, b: 0.2 },
+        headerText: { r: 1, g: 1, b: 1 },
+        bodyFill: { r: 0.13, g: 0.11, b: 0.1 },
+        bodyStroke: { r: 0.3, g: 0.3, b: 0.3 },
+        textPrimary: { r: 0.9, g: 0.9, b: 0.9 },
+        textSecondary: { r: 0.6, g: 0.6, b: 0.6 },
+        prefix: { r: 1, g: 0.72, b: 0.3 }, // Warm Gold
+        connector: { r: 0.2, g: 0.6, b: 1 } // Blue
+    },
+    'light': {
+        containerFill: { r: 0.98, g: 0.98, b: 0.98 }, // Near White
+        containerStroke: { r: 0.85, g: 0.85, b: 0.85 },
+        headerFill: { r: 0.9, g: 0.9, b: 0.9 }, // Light Grey
+        headerText: { r: 0.2, g: 0.2, b: 0.2 }, // Dark Grey
+        bodyFill: { r: 1, g: 1, b: 1 },
+        bodyStroke: { r: 0.9, g: 0.9, b: 0.9 },
+        textPrimary: { r: 0.2, g: 0.2, b: 0.2 }, // Dark Grey
+        textSecondary: { r: 0.5, g: 0.5, b: 0.5 },
+        prefix: { r: 0.8, g: 0.4, b: 0 }, // Burnt Orange
+        connector: { r: 0.2, g: 0.2, b: 0.2 } // Dark Grey
+    },
+    'blueprint': {
+        containerFill: { r: 0.05, g: 0.1, b: 0.2 }, // Deep Blue
+        containerStroke: { r: 0.2, g: 0.4, b: 0.8 }, // Bright Blue
+        headerFill: { r: 0.1, g: 0.2, b: 0.4 },
+        headerText: { r: 0.4, g: 0.8, b: 1 }, // Cyan
+        bodyFill: { r: 0.05, g: 0.1, b: 0.2 },
+        bodyStroke: { r: 0.2, g: 0.4, b: 0.8 },
+        textPrimary: { r: 0.8, g: 0.9, b: 1 }, // Light Cyan
+        textSecondary: { r: 0.4, g: 0.6, b: 0.8 },
+        prefix: { r: 0, g: 1, b: 1 }, // Cyan
+        connector: { r: 0, g: 1, b: 1 } // Cyan
+    }
+};
+
 // Helper: load Fonts
 async function loadFonts() {
     await figma.loadFontAsync({ family: "Inter", style: "Regular" });
@@ -44,7 +97,9 @@ function rgbToHex(r: number, g: number, b: number): string {
 }
 
 // Helper: Create an annotation tag
-const createAnnotationTag = (entries: AnnotationEntry[], nodeName: string) => {
+const createAnnotationTag = (entries: AnnotationEntry[], nodeName: string, themeName: string = 'dark') => {
+    const theme = THEMES[themeName] || THEMES['dark'];
+
     // 1. Container (Vertical)
     const container = figma.createFrame();
     container.name = "Annotation Tag"; // Name for layer list
@@ -65,12 +120,14 @@ const createAnnotationTag = (entries: AnnotationEntry[], nodeName: string) => {
     header.paddingTop = 4;
     header.paddingBottom = 4;
     header.cornerRadius = 4;
-    header.fills = [{ type: 'SOLID', color: { r: 0.2, g: 0.2, b: 0.2 } }]; // Dark Grey
+
+    // Header Style
+    header.fills = [{ type: 'SOLID', color: theme.headerFill }];
 
     const headerText = figma.createText();
     headerText.characters = nodeName;
     headerText.fontSize = 10;
-    headerText.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }]; // White
+    headerText.fills = [{ type: 'SOLID', color: theme.headerText }];
     header.appendChild(headerText);
 
     // 3. Body (The Properties)
@@ -86,8 +143,8 @@ const createAnnotationTag = (entries: AnnotationEntry[], nodeName: string) => {
     body.itemSpacing = 8;
     body.cornerRadius = 8;
 
-    body.fills = [{ type: 'SOLID', color: { r: 0.13, g: 0.11, b: 0.1 } }];
-    body.strokes = [{ type: 'SOLID', color: { r: 0.3, g: 0.3, b: 0.3 } }];
+    body.fills = [{ type: 'SOLID', color: theme.bodyFill }];
+    body.strokes = [{ type: 'SOLID', color: theme.bodyStroke }];
     body.strokeWeight = 1;
 
     // Define Order Priority
@@ -129,11 +186,11 @@ const createAnnotationTag = (entries: AnnotationEntry[], nodeName: string) => {
         textNode.characters = fullText;
         textNode.fontSize = 11;
 
-        // Default color 
-        textNode.fills = [{ type: 'SOLID', color: { r: 0.9, g: 0.9, b: 0.9 } }];
+        // Content Color 
+        textNode.fills = [{ type: 'SOLID', color: theme.textPrimary }];
 
         // Style the Prefix 
-        textNode.setRangeFills(0, entry.prefix.length, [{ type: 'SOLID', color: { r: 1, g: 0.72, b: 0.3 } }]);
+        textNode.setRangeFills(0, entry.prefix.length, [{ type: 'SOLID', color: theme.prefix }]);
 
         // Font Styles (Assuming Inter available, or fallback)
         // Note: Ideally we load these fonts before using setRangeFontName to avoid errors.
@@ -588,20 +645,23 @@ figma.ui.onmessage = async (msg) => {
                     let distBottom = (frameAbsY + frameHeight) - centerY;
 
                     // --- POLISH: Edge Preference Bias ---
-                    // Encourage Left/Right placement for corner items (like Close icon)
-                    const relX = (centerX - frameAbsX) / frameWidth;
-                    // const relY = (centerY - frameAbsY) / frameHeight;
+                    // Heuristic: Wide elements (Buttons) should prefer Side annotations to avoid vertical stacking.
+                    // Tall elements (Cards) might prefer Top/Bottom naturally.
+                    const aspect = frameWidth / frameHeight;
+                    let sideBias = 1.0;
 
-                    // Bias Factors (Multiply distance by < 1 to make it "closer")
-                    const SIDE_PREFERENCE_FACTOR = 0.6; // Strong preference for sides
-
-                    if (relX > 0.8) {
-                        // Far Right -> Prefer Right
-                        distRight *= SIDE_PREFERENCE_FACTOR;
-                    } else if (relX < 0.2) {
-                        // Far Left -> Prefer Left
-                        distLeft *= SIDE_PREFERENCE_FACTOR;
+                    if (aspect > 1.2) {
+                        // Wide element -> Prefer Sides strongly
+                        sideBias = 0.4; // Make sides appear 60% closer
                     }
+
+                    // Apply bias
+                    distLeft *= sideBias;
+                    distRight *= sideBias;
+
+                    // Keep extreme corner preference?
+                    // If very close to edge, maybe fine to keep implicit logic.
+                    // But aspect ratio is generally more robust for shape-based layout.
 
                     const min = Math.min(distLeft, distRight, distTop, distBottom);
 
@@ -645,8 +705,69 @@ figma.ui.onmessage = async (msg) => {
                     return { r: 0.2, g: 0.6, b: 1 }; // Default Blue
                 };
 
+                const currentTheme = msg.options.theme || 'dark';
+
                 // Keep track of placed tags to avoid overlap
                 const placedTagsBoxes: Box[] = [];
+
+                // --- SMART COLLISION AVOIDANCE ---
+                // Pre-populate with existing nodes to avoid overlap with buttons/existing tags
+                try {
+                    const obstacles = new Set<SceneNode>();
+
+                    // Add siblings of the target node (e.g. other buttons in the frame)
+                    if (rootNode.parent && 'children' in rootNode.parent) {
+                        for (const child of rootNode.parent.children) {
+                            obstacles.add(child);
+                        }
+                    }
+
+                    // Add children of the Page (e.g. previous annotation groups)
+                    // This handles cases where tags are placed at Page level
+                    for (const child of figma.currentPage.children) {
+                        obstacles.add(child);
+                    }
+
+                    // Define a "Broad Search Area" around the target to avoid scanning the whole world
+                    const searchBounds = {
+                        x: frameAbsX - 500,
+                        y: frameAbsY - 500,
+                        width: frameWidth + 1000,
+                        height: frameHeight + 1000
+                    };
+
+                    for (const obs of obstacles) {
+                        // Ignore self (the thing being annotated)
+                        if (obs.id === rootNode.id) continue;
+
+                        // Ignore explicit hidden
+                        if ('visible' in obs && !obs.visible) continue;
+
+                        // Check bounds
+                        if (!obs.absoluteBoundingBox) continue;
+
+                        const b = obs.absoluteBoundingBox;
+
+                        // Check intersection with "Search Area"
+                        const intersects = (
+                            b.x < searchBounds.x + searchBounds.width &&
+                            b.x + b.width > searchBounds.x &&
+                            b.y < searchBounds.y + searchBounds.height &&
+                            b.y + b.height > searchBounds.y
+                        );
+
+                        if (intersects) {
+                            placedTagsBoxes.push({
+                                x: b.x,
+                                y: b.y,
+                                width: b.width,
+                                height: b.height
+                            });
+                        }
+                    }
+                } catch (e) {
+                    console.error("Error in Smart Collision Avoidance setup:", e);
+                }
 
                 // Helper to check collision with placed tags
                 const isColliding = (testBox: Box) => {
@@ -662,7 +783,7 @@ figma.ui.onmessage = async (msg) => {
                 const startX_Right = frameAbsX + frameWidth + PADDING;
 
                 for (const data of right) {
-                    const tag = createAnnotationTag(data.entries, data.nodes[0].name);
+                    const tag = createAnnotationTag(data.entries, data.nodes[0].name, currentTheme);
                     const tagBoxBox = getBoundingBox(data.nodes);
                     const nodeCenterY = tagBoxBox.y + (tagBoxBox.height / 2);
 
@@ -747,7 +868,7 @@ figma.ui.onmessage = async (msg) => {
                 const startX_Left = frameAbsX - PADDING;
 
                 for (const data of left) {
-                    const tag = createAnnotationTag(data.entries, data.nodes[0].name);
+                    const tag = createAnnotationTag(data.entries, data.nodes[0].name, currentTheme);
                     const tagBoxBox = getBoundingBox(data.nodes);
                     const nodeCenterY = tagBoxBox.y + (tagBoxBox.height / 2);
 
@@ -819,7 +940,7 @@ figma.ui.onmessage = async (msg) => {
                 const startY_Top_Real = frameAbsY - PADDING;
 
                 for (const data of top) {
-                    const tag = createAnnotationTag(data.entries, data.nodes[0].name);
+                    const tag = createAnnotationTag(data.entries, data.nodes[0].name, currentTheme);
                     const box = getBoundingBox(data.nodes);
                     const centerX = box.x + box.width / 2;
 
@@ -858,7 +979,7 @@ figma.ui.onmessage = async (msg) => {
                 const startY_Bottom = frameAbsY + frameHeight + PADDING;
 
                 for (const data of bottom) {
-                    const tag = createAnnotationTag(data.entries, data.nodes[0].name);
+                    const tag = createAnnotationTag(data.entries, data.nodes[0].name, currentTheme);
                     const box = getBoundingBox(data.nodes);
                     const centerX = box.x + box.width / 2;
 

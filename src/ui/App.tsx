@@ -5,6 +5,7 @@ const App = () => {
         annotateColors: true,
         annotateTypography: true,
         annotateStates: true,
+        theme: 'dark', // Default theme
     });
 
     const onAnnotate = () => {
@@ -18,6 +19,11 @@ const App = () => {
     const handleCheckboxChange = (event: React.ChangeEvent<HTMLInputElement>) => {
         const { name, checked } = event.target;
         setOptions(prev => ({ ...prev, [name]: checked }));
+    };
+
+    const handleSelectChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+        const { name, value } = event.target;
+        setOptions(prev => ({ ...prev, [name]: value }));
     };
 
     return (
@@ -96,6 +102,29 @@ const App = () => {
                     />
                     <span>Annotate Component States</span>
                 </label>
+
+                <div style={{ height: '1px', backgroundColor: '#f0f0f0' }}></div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <label style={{ fontSize: '12px', fontWeight: 600, color: '#555' }}>Color Theme</label>
+                    <select
+                        name="theme"
+                        value={options.theme}
+                        onChange={handleSelectChange}
+                        style={{
+                            padding: '8px',
+                            borderRadius: '6px',
+                            border: '1px solid #e0e0e0',
+                            fontSize: '13px',
+                            outline: 'none',
+                            backgroundColor: '#f9f9f9'
+                        }}
+                    >
+                        <option value="dark">Dark (Default)</option>
+                        <option value="light">Light (Clean)</option>
+                        <option value="blueprint">Blueprint (Blue)</option>
+                    </select>
+                </div>
             </div>
 
             {/* Actions */}
