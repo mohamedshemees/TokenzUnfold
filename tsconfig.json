@@ -2,10 +2,13 @@
     "compilerOptions": {
         "target": "ES6",
         "lib": [
-            "ES6",
+            "ES2017",
             "DOM",
             "DOM.Iterable",
             "WebWorker"
+        ],
+        "types": [
+            "@figma/plugin-typings"
         ],
         "module": "ESNext",
         "skipLibCheck": true,

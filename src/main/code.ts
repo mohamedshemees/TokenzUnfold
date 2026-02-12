@@ -138,7 +138,7 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
             }
 
             // B. Fill Styles
-            if ('fillStyleId' in node && node.fillStyleId && typeof node.fillStyleId === 'string' && node.fillStyleId !== figma.mixed) {
+            if ('fillStyleId' in node && node.fillStyleId && typeof node.fillStyleId === 'string') {
                 try {
                     const style = figma.getStyleById(node.fillStyleId);
                     if (style) {
@@ -180,7 +180,7 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
             }
 
             // Styles
-            if ('strokeStyleId' in node && node.strokeStyleId && typeof node.strokeStyleId === 'string' && node.strokeStyleId !== figma.mixed) {
+            if ('strokeStyleId' in node && node.strokeStyleId && typeof node.strokeStyleId === 'string') {
                 try {
                     const style = figma.getStyleById(node.strokeStyleId);
                     if (style) {
@@ -199,7 +199,7 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
     // 2. TYPOGRAPHY (Styles)
     if (options.annotateTypography) {
         if (node.type === 'TEXT') {
-            if (node.textStyleId && typeof node.textStyleId === 'string' && node.textStyleId !== figma.mixed) {
+            if (node.textStyleId && typeof node.textStyleId === 'string') {
                 try {
                     const style = figma.getStyleById(node.textStyleId);
                     if (style) {
@@ -218,12 +218,13 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
     // 3. STATES (Component Properties)
     if (options.annotateStates) {
         if (node.type === 'INSTANCE' || node.type === 'COMPONENT') {
-            if (node.componentProperties) {
+            if ('componentProperties' in node) {
+                // @ts-ignore
                 const props = node.componentProperties;
                 let stateText = "";
                 for (const [key, value] of Object.entries(props)) {
                     if (['State', 'Status', 'Type', 'Variant'].some(k => key.includes(k))) {
-                        stateText += `${key}=${value.value} `;
+                        stateText += `${key}=${(value as any).value} `;
                     }
                 }
                 if (stateText) {
@@ -280,7 +281,7 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
             if (child.type === 'TEXT' && !ignoredIds.has(child.id)) {
                 // Typography
                 if (options.annotateTypography) {
-                    if (child.textStyleId && typeof child.textStyleId === 'string' && child.textStyleId !== figma.mixed) {
+                    if (child.textStyleId && typeof child.textStyleId === 'string') {
                         try {
                             const style = figma.getStyleById(child.textStyleId);
                             if (style) {
@@ -323,7 +324,7 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
                         }
 
                         // Style
-                        if ('fillStyleId' in child && child.fillStyleId && typeof child.fillStyleId === 'string' && child.fillStyleId !== figma.mixed) {
+                        if ('fillStyleId' in child && child.fillStyleId && typeof child.fillStyleId === 'string') {
                             try {
                                 const style = figma.getStyleById(child.fillStyleId);
                                 if (style) {
@@ -367,7 +368,7 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
                         }
 
                         // Style
-                        if ('strokeStyleId' in child && child.strokeStyleId && typeof child.strokeStyleId === 'string' && child.strokeStyleId !== figma.mixed) {
+                        if ('strokeStyleId' in child && child.strokeStyleId && typeof child.strokeStyleId === 'string') {
                             try {
                                 const style = figma.getStyleById(child.strokeStyleId);
                                 if (style) {
