@@ -16,8 +16,15 @@ interface AnnotationEntry {
 }
 
 interface AnnotationData {
-    node: SceneNode;
+    nodes: SceneNode[]; // Array for deduplication
     entries: AnnotationEntry[];
+}
+
+interface Box {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
 }
 
 // Helper: load Fonts
@@ -116,18 +123,48 @@ function createAnnotationTag(entries: AnnotationEntry[]) {
     return frame;
 }
 
-// Helper: Draw connector line (Standard) - NOT USED IN SMART LAYOUT BUT KEPT FOR REFERENCE
-function createConnector(start: Vector, end: Vector, color: RGB) {
-    const line = figma.createVector();
-    line.name = "Connector";
-    line.vectorPaths = [{
-        windingRule: "NONZERO",
-        data: `M ${start.x} ${start.y} L ${end.x} ${end.y}`
-    }];
-    line.strokes = [{ type: 'SOLID', color: color }];
-    line.strokeWeight = 1;
-    line.strokeCap = "ROUND";
-    return line;
+// Helper: Check collision between two boxes
+function checkCollision(box1: Box, box2: Box, padding: number = 0): boolean {
+    return (
+        box1.x < box2.x + box2.width + padding &&
+        box1.x + box1.width + padding > box2.x &&
+        box1.y < box2.y + box2.height + padding &&
+        box1.y + box1.height + padding > box2.y
+    );
+}
+
+// Helper: Get bounding box of a node or group of nodes
+function getBoundingBox(nodes: SceneNode[]): Box {
+    if (nodes.length === 0) return { x: 0, y: 0, width: 0, height: 0 };
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+    for (const node of nodes) {
+        // Use absoluteBoundingBox if available for rotation support, otherwise fallback
+        // Since plugin API is mixed, absoluteTransform to get x/y is safer if no rotation, 
+        // but absoluteBoundingBox is best. Let's try absoluteBoundingBox.
+        if (node.absoluteBoundingBox) {
+            minX = Math.min(minX, node.absoluteBoundingBox.x);
+            minY = Math.min(minY, node.absoluteBoundingBox.y);
+            maxX = Math.max(maxX, node.absoluteBoundingBox.x + node.absoluteBoundingBox.width);
+            maxY = Math.max(maxY, node.absoluteBoundingBox.y + node.absoluteBoundingBox.height);
+        } else {
+            // Fallback for simple cases
+            const x = node.absoluteTransform[0][2];
+            const y = node.absoluteTransform[1][2];
+            minX = Math.min(minX, x);
+            minY = Math.min(minY, y);
+            maxX = Math.max(maxX, x + node.width);
+            maxY = Math.max(maxY, y + node.height);
+        }
+    }
+
+    return {
+        x: minX,
+        y: minY,
+        width: maxX - minX,
+        height: maxY - minY
+    };
 }
 
 // Recursive traversal to Collect Data
@@ -358,6 +395,42 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
         }
     }
 
+    // 5. AUTO LAYOUT PADDING & SPACING
+    if ('layoutMode' in node && node.layoutMode !== 'NONE') {
+        const paddingLeft = node.paddingLeft || 0;
+        const paddingRight = node.paddingRight || 0;
+        const paddingTop = node.paddingTop || 0;
+        const paddingBottom = node.paddingBottom || 0;
+        const itemSpacing = node.itemSpacing || 0;
+
+        // Simplify display: 
+        // If all padding equal: "P: 16"
+        // If horiz/vert equal: "PH: 16 PV: 8"
+        // Else: "P: 10 20 10 20" (CSS order)
+
+        let paddingText = "";
+        if (paddingLeft === paddingRight && paddingTop === paddingBottom && paddingLeft === paddingTop) {
+            if (paddingLeft > 0) paddingText = `P:${paddingLeft}`;
+        } else if (paddingLeft === paddingRight && paddingTop === paddingBottom) {
+            paddingText = `PH:${paddingLeft} PV:${paddingTop}`;
+        } else {
+            paddingText = `P:${paddingTop} ${paddingRight} ${paddingBottom} ${paddingLeft}`;
+        }
+
+        const spacingText = itemSpacing > 0 ? `Gap:${itemSpacing}` : "";
+
+        if (paddingText || spacingText) {
+            const content = [paddingText, spacingText].filter(Boolean).join(" ");
+            localEntries.push({
+                label: 'Spacing',
+                prefix: 'Layout',
+                content: content,
+                color: { r: 0.9, g: 0.4, b: 0.5 }, // Pinkish
+                type: 'state' // reuse state color/type or new one
+            });
+        }
+    }
+
     // 5. EFFECTS (Drop Shadow)
     if ('effects' in node && (node.effects as any[]).length > 0) {
         for (const effect of node.effects) {
@@ -505,7 +578,7 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
 
     if (localEntries.length > 0) {
         collected.push({
-            node: node,
+            nodes: [node], // Start with single node
             entries: localEntries
         });
     }
@@ -535,19 +608,43 @@ figma.ui.onmessage = async (msg) => {
                 const ignoredIds = new Set<string>();
                 console.log("Collecting annotations for", rootNode.name);
                 await collectAnnotations(rootNode, msg.options, collectedData, ignoredIds);
-                console.log("Collected items:", collectedData.length);
+                console.log("Collected items (raw):", collectedData.length);
 
                 if (collectedData.length === 0) {
                     figma.notify("No annotations found for selection.");
                     continue;
                 }
 
+                // --- DEDUPLICATION ---
+                const uniqueAnnotationsMap = new Map<string, AnnotationData>();
+
+                for (const item of collectedData) {
+                    // Create a unique key based on the entries content
+                    // Sort entries first to ensure consistent key
+                    // We need to compare specific fields, ignore simple object ref diffs
+                    const simpleEntries = item.entries.map(e => `${e.prefix}:${e.content}|${e.type}`).sort();
+                    const key = JSON.stringify(simpleEntries);
+
+                    if (uniqueAnnotationsMap.has(key)) {
+                        // Merge nodes
+                        const existing = uniqueAnnotationsMap.get(key);
+                        if (existing) {
+                            existing.nodes.push(...item.nodes);
+                        }
+                    } else {
+                        uniqueAnnotationsMap.set(key, item);
+                    }
+                }
+
+                const deduplicatedData = Array.from(uniqueAnnotationsMap.values());
+                console.log("Collected items (unique):", deduplicatedData.length);
+
                 const nodesToGroup: SceneNode[] = [];
 
                 // Layout Config
-                const GAP = 10;
-                const PADDING = 60; // Distance from edge of frame to start of tags
-                const UNIFIED_COLOR = { r: 0.2, g: 0.6, b: 1 };
+                const PADDING = 60; // Distance from content bounding box to start of tags
+                const COLLISION_PADDING = 5; // Extra padding for collision detection
+                // const UNIFIED_COLOR = { r: 0.2, g: 0.6, b: 1 }; // Removed in favor of dynamic color
 
                 // Buckets for edges
                 const top: AnnotationData[] = [];
@@ -555,22 +652,39 @@ figma.ui.onmessage = async (msg) => {
                 const left: AnnotationData[] = [];
                 const right: AnnotationData[] = [];
 
-                // Helper to determine nearest edge
+                // Helper to determine nearest edge based on GROUP Bounding Box
                 const frameAbsX = rootNode.absoluteTransform[0][2];
                 const frameAbsY = rootNode.absoluteTransform[1][2];
                 const frameWidth = rootNode.width;
                 const frameHeight = rootNode.height;
 
-                for (const data of collectedData) {
-                    const nodeAbsX = data.node.absoluteTransform[0][2];
-                    const nodeAbsY = data.node.absoluteTransform[1][2];
-                    const nodeWidth = data.node.width;
-                    const nodeHeight = data.node.height;
+                for (const data of deduplicatedData) {
+                    const box = getBoundingBox(data.nodes);
 
-                    const distLeft = nodeAbsX - frameAbsX;
-                    const distRight = (frameAbsX + frameWidth) - (nodeAbsX + nodeWidth);
-                    const distTop = nodeAbsY - frameAbsY;
-                    const distBottom = (frameAbsY + frameHeight) - (nodeAbsY + nodeHeight);
+                    // Determine which edge is closest to the *center* of the group box
+                    const centerX = box.x + box.width / 2;
+                    const centerY = box.y + box.height / 2;
+
+                    let distLeft = centerX - frameAbsX;
+                    let distRight = (frameAbsX + frameWidth) - centerX;
+                    let distTop = centerY - frameAbsY;
+                    let distBottom = (frameAbsY + frameHeight) - centerY;
+
+                    // --- POLISH: Edge Preference Bias ---
+                    // Encourage Left/Right placement for corner items (like Close icon)
+                    const relX = (centerX - frameAbsX) / frameWidth;
+                    // const relY = (centerY - frameAbsY) / frameHeight;
+
+                    // Bias Factors (Multiply distance by < 1 to make it "closer")
+                    const SIDE_PREFERENCE_FACTOR = 0.6; // Strong preference for sides
+
+                    if (relX > 0.8) {
+                        // Far Right -> Prefer Right
+                        distRight *= SIDE_PREFERENCE_FACTOR;
+                    } else if (relX < 0.2) {
+                        // Far Left -> Prefer Left
+                        distLeft *= SIDE_PREFERENCE_FACTOR;
+                    }
 
                     const min = Math.min(distLeft, distRight, distTop, distBottom);
 
@@ -580,114 +694,278 @@ figma.ui.onmessage = async (msg) => {
                     else right.push(data);
                 }
 
-                // Sort and Render Functions
+                // Deterministic Sort Helper
+                const sortAnnotations = (list: AnnotationData[], mainAxis: 'x' | 'y') => {
+                    list.sort((a, b) => {
+                        const boxA = getBoundingBox(a.nodes);
+                        const boxB = getBoundingBox(b.nodes);
+
+                        // 1. Primary: Main Axis Position
+                        const diffMain = mainAxis === 'y' ? boxA.y - boxB.y : boxA.x - boxB.x;
+                        if (Math.abs(diffMain) > 1) return diffMain;
+
+                        // 2. Secondary: Cross Axis Position
+                        const diffCross = mainAxis === 'y' ? boxA.x - boxB.x : boxA.y - boxB.y;
+                        if (Math.abs(diffCross) > 1) return diffCross;
+
+                        // 3. Tertiary: Content Determinism (Label/Prefix)
+                        const contentA = a.entries.map(e => e.label + e.content).join('');
+                        const contentB = b.entries.map(e => e.label + e.content).join('');
+                        const diffContent = contentA.localeCompare(contentB);
+                        if (diffContent !== 0) return diffContent;
+
+                        // 4. Quaternary: Node ID (Final tie-breaker)
+                        return a.nodes[0].id.localeCompare(b.nodes[0].id);
+                    });
+                };
+
+                // Helper: Get dominant color for connector
+                const getConnectorColor = (data: AnnotationData): RGB => {
+                    if (data.entries.length > 0) {
+                        // Use the color of the first entry (highest priority)
+                        return data.entries[0].color;
+                    }
+                    return { r: 0.2, g: 0.6, b: 1 }; // Default Blue
+                };
+
+                // Keep track of placed tags to avoid overlap
+                const placedTagsBoxes: Box[] = [];
+
+                // Helper to check collision with placed tags
+                const isColliding = (testBox: Box) => {
+                    return placedTagsBoxes.some(placedBox => checkCollision(testBox, placedBox, COLLISION_PADDING));
+                };
 
                 // --- RIGHT EDGE ---
-                // Sort by Y (Top to Bottom)
-                right.sort((a, b) => a.node.absoluteTransform[1][2] - b.node.absoluteTransform[1][2]);
+                sortAnnotations(right, 'y'); // Sort Top-to-Bottom
 
-                // Track the bottom of the previous tag to avoid overlap
-                let lastBottom_Right = -Infinity;
                 const startX_Right = frameAbsX + frameWidth + PADDING;
 
                 for (const data of right) {
                     const tag = createAnnotationTag(data.entries);
+                    const tagBoxBox = getBoundingBox(data.nodes);
+                    const nodeCenterY = tagBoxBox.y + (tagBoxBox.height / 2);
 
-                    // Ideal Y: Center of tag aligned with Center of Component
-                    const nodeCenterY = data.node.absoluteTransform[1][2] + (data.node.height / 2);
-                    const idealY = nodeCenterY - (tag.height / 2);
+                    // Ideal Y: Center of tag aligned with Center of Component Group
+                    let idealY = nodeCenterY - (tag.height / 2);
+                    let xPos = startX_Right;
 
-                    // Place tag: Max of (Ideal, Previous Bottom + Gap)
-                    const yPos = Math.max(idealY, lastBottom_Right + GAP);
+                    // Hybrid Packing Strategy:
+                    // 1. Try to place at IdealY in current column.
+                    // 2. If colliding, try nearby vertical spots in current column (Up/Down).
+                    // 3. If no spot found vertically within limit, move to next column (Outwards).
 
-                    tag.x = startX_Right;
-                    tag.y = yPos;
+                    let placed = false;
+                    let currentColumnX = xPos;
+                    let attempts = 0;
+
+                    const VERTICAL_SEARCH_RANGE = 150; // Search up/down 150px
+                    const VERTICAL_STEP = tag.height + 4; // Step by tag height + gap
+
+                    while (!placed && attempts < 20) {
+                        // Check Vertical Spots in this column
+                        // 0, +1, -1, +2, -2...
+
+                        let bestY = null;
+
+                        // Try central first
+                        let testBox = { x: currentColumnX, y: idealY, width: tag.width, height: tag.height };
+                        if (!isColliding(testBox)) {
+                            bestY = idealY;
+                        } else {
+                            // Search Spiral Outwards Vertically
+                            for (let i = 1; i * VERTICAL_STEP <= VERTICAL_SEARCH_RANGE; i++) {
+                                // Down
+                                const yDown = idealY + (i * VERTICAL_STEP);
+                                testBox.y = yDown;
+                                if (!isColliding(testBox)) {
+                                    bestY = yDown;
+                                    break;
+                                }
+                                // Up
+                                const yUp = idealY - (i * VERTICAL_STEP);
+                                testBox.y = yUp;
+                                if (!isColliding(testBox)) {
+                                    bestY = yUp;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (bestY !== null) {
+                            // Found a spot!
+                            tag.x = currentColumnX;
+                            tag.y = bestY;
+                            placedTagsBoxes.push({ x: currentColumnX, y: bestY, width: tag.width, height: tag.height });
+                            placed = true;
+                        } else {
+                            // No spot in this column, move outwards
+                            currentColumnX += tag.width + 10;
+                            attempts++;
+                        }
+                    }
+
+                    // Fallback if max attempts reached (just place it far out)
+                    if (!placed) {
+                        tag.x = currentColumnX;
+                        tag.y = idealY;
+                        placedTagsBoxes.push({ x: currentColumnX, y: idealY, width: tag.width, height: tag.height });
+                    }
+
                     nodesToGroup.push(tag);
 
-                    lastBottom_Right = yPos + tag.height;
+                    const tagAnchorX = tag.x;
+                    const tagAnchorY = tag.y + (tag.height / 2);
+                    const connectorColor = getConnectorColor(data);
 
-                    // Connector
-                    const targetX = data.node.absoluteTransform[0][2] + data.node.width;
-                    const targetY = nodeCenterY;
-                    const tagX = tag.x;
-                    const tagY = tag.y + (tag.height / 2);
-
-                    drawSmartConnector(targetX, targetY, tagX, tagY, UNIFIED_COLOR, nodesToGroup, 'RIGHT');
+                    drawSmartConnector(data.nodes, tagAnchorX, tagAnchorY, connectorColor, nodesToGroup, 'RIGHT');
                 }
 
                 // --- LEFT EDGE ---
-                // Sort by Y (Top to Bottom)
-                left.sort((a, b) => a.node.absoluteTransform[1][2] - b.node.absoluteTransform[1][2]);
-                let lastBottom_Left = -Infinity;
+                sortAnnotations(left, 'y'); // Sort Top-to-Bottom
+
+                const startX_Left = frameAbsX - PADDING;
 
                 for (const data of left) {
                     const tag = createAnnotationTag(data.entries);
+                    const tagBoxBox = getBoundingBox(data.nodes);
+                    const nodeCenterY = tagBoxBox.y + (tagBoxBox.height / 2);
 
-                    const nodeCenterY = data.node.absoluteTransform[1][2] + (data.node.height / 2);
-                    const idealY = nodeCenterY - (tag.height / 2);
-                    const yPos = Math.max(idealY, lastBottom_Left + GAP);
+                    let idealY = nodeCenterY - (tag.height / 2);
 
-                    // Align right side of tag to PADDING from left edge
-                    tag.x = frameAbsX - PADDING - tag.width;
+                    // Initial X: Left side of frame - padding - tag width
+                    let xPos = startX_Left - tag.width;
+
+                    let placed = false;
+                    let currentColumnX = xPos;
+                    let attempts = 0;
+
+                    const VERTICAL_SEARCH_RANGE = 150;
+                    const VERTICAL_STEP = tag.height + 4;
+
+                    while (!placed && attempts < 20) {
+                        let bestY = null;
+
+                        let testBox = { x: currentColumnX, y: idealY, width: tag.width, height: tag.height };
+                        if (!isColliding(testBox)) {
+                            bestY = idealY;
+                        } else {
+                            for (let i = 1; i * VERTICAL_STEP <= VERTICAL_SEARCH_RANGE; i++) {
+                                const yDown = idealY + (i * VERTICAL_STEP);
+                                testBox.y = yDown;
+                                if (!isColliding(testBox)) {
+                                    bestY = yDown;
+                                    break;
+                                }
+                                const yUp = idealY - (i * VERTICAL_STEP);
+                                testBox.y = yUp;
+                                if (!isColliding(testBox)) {
+                                    bestY = yUp;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (bestY !== null) {
+                            tag.x = currentColumnX;
+                            tag.y = bestY;
+                            placedTagsBoxes.push({ x: currentColumnX, y: bestY, width: tag.width, height: tag.height });
+                            placed = true;
+                        } else {
+                            // Move Outwards (Left)
+                            currentColumnX -= (tag.width + 10);
+                            attempts++;
+                        }
+                    }
+
+                    if (!placed) {
+                        tag.x = currentColumnX;
+                        tag.y = idealY;
+                        placedTagsBoxes.push({ x: currentColumnX, y: idealY, width: tag.width, height: tag.height });
+                    }
+
+                    nodesToGroup.push(tag);
+
+                    const tagAnchorX = tag.x + tag.width;
+                    const tagAnchorY = tag.y + (tag.height / 2);
+                    const connectorColor = getConnectorColor(data);
+
+                    drawSmartConnector(data.nodes, tagAnchorX, tagAnchorY, connectorColor, nodesToGroup, 'LEFT');
+                }
+
+                // --- TOP EDGE ---
+                sortAnnotations(top, 'x'); // Sort Left-to-Right
+
+                const startY_Top_Real = frameAbsY - PADDING;
+
+                for (const data of top) {
+                    const tag = createAnnotationTag(data.entries);
+                    const box = getBoundingBox(data.nodes);
+                    const centerX = box.x + box.width / 2;
+
+                    let idealX = centerX - (tag.width / 2);
+                    let yPos = startY_Top_Real - tag.height;
+
+                    let testBox = { x: idealX, y: yPos, width: tag.width, height: tag.height };
+                    let attempts = 0;
+
+                    // Concentric: If colliding, move OUTWARDS (decrease Y, go further up)
+                    // Keep simple concentric for Top/Bottom as narrow vertical aspect ratio makes horizontal spread less likely to be an issue?
+                    // Or apply similar logic? Let's just keep concentric for Top/Bottom for now to avoid complexity overload, unless requested.
+                    while (isColliding(testBox) && attempts < 50) {
+                        yPos -= (tag.height + 10);
+                        testBox.y = yPos;
+                        attempts++;
+                    }
+
+                    tag.x = idealX;
                     tag.y = yPos;
                     nodesToGroup.push(tag);
 
-                    lastBottom_Left = yPos + tag.height;
+                    placedTagsBoxes.push(testBox);
 
-                    const targetX = data.node.absoluteTransform[0][2]; // Left edge of node
-                    const targetY = nodeCenterY;
-                    const tagX = tag.x + tag.width; // Right edge of tag
-                    const tagY = tag.y + (tag.height / 2);
+                    const tagAnchorX = tag.x + (tag.width / 2);
+                    const tagAnchorY = tag.y + tag.height;
+                    const connectorColor = getConnectorColor(data);
 
-                    drawSmartConnector(targetX, targetY, tagX, tagY, UNIFIED_COLOR, nodesToGroup, 'LEFT');
+                    drawSmartConnector(data.nodes, tagAnchorX, tagAnchorY, connectorColor, nodesToGroup, 'TOP');
                 }
 
-                // Sort by position to avoid crossing lines
-                // Top/Bottom: Primary Sort X, Secondary Sort Y (Outer -> Inner)
-                top.sort((a, b) => {
-                    const xDiff = a.node.absoluteTransform[0][2] - b.node.absoluteTransform[0][2];
-                    if (Math.abs(xDiff) > 1) return xDiff;
-                    return b.node.absoluteTransform[1][2] - a.node.absoluteTransform[1][2]; // Bottom-most first (closest to frame top edge? No, outer is smaller Y)
-                });
-                bottom.sort((a, b) => {
-                    const xDiff = a.node.absoluteTransform[0][2] - b.node.absoluteTransform[0][2];
-                    if (Math.abs(xDiff) > 1) return xDiff;
-                    return a.node.absoluteTransform[1][2] - b.node.absoluteTransform[1][2]; // Top-most first (closest to frame bottom edge? No, outer is larger Y)
-                });
 
-                // Left/Right: Primary Sort Y, Secondary Sort X (Outer -> Inner)
-                left.sort((a, b) => {
-                    const yDiff = a.node.absoluteTransform[1][2] - b.node.absoluteTransform[1][2];
-                    if (Math.abs(yDiff) > 1) return yDiff; // Top to Bottom
-                    return b.node.absoluteTransform[0][2] - a.node.absoluteTransform[0][2]; // Right-most first (closest to frame left edge)
-                });
-                right.sort((a, b) => {
-                    const yDiff = a.node.absoluteTransform[1][2] - b.node.absoluteTransform[1][2];
-                    if (Math.abs(yDiff) > 1) return yDiff; // Top to Bottom
-                    return a.node.absoluteTransform[0][2] - b.node.absoluteTransform[0][2]; // Left-most first (closest to frame right edge)
-                });
-                let lastRight_Bottom = -Infinity;
+                // --- BOTTOM EDGE ---
+                sortAnnotations(bottom, 'x'); // Sort Left-to-Right
+
                 const startY_Bottom = frameAbsY + frameHeight + PADDING;
 
                 for (const data of bottom) {
                     const tag = createAnnotationTag(data.entries);
+                    const box = getBoundingBox(data.nodes);
+                    const centerX = box.x + box.width / 2;
 
-                    const nodeCenterX = data.node.absoluteTransform[0][2] + (data.node.width / 2);
-                    const idealX = nodeCenterX - (tag.width / 2);
-                    const xPos = Math.max(idealX, lastRight_Bottom + GAP);
+                    let idealX = centerX - (tag.width / 2);
+                    let yPos = startY_Bottom;
 
-                    tag.x = xPos;
-                    tag.y = startY_Bottom;
+                    let testBox = { x: idealX, y: yPos, width: tag.width, height: tag.height };
+                    let attempts = 0;
+
+                    // Concentric: If colliding, move OUTWARDS (increase Y, go further down)
+                    while (isColliding(testBox) && attempts < 50) {
+                        yPos += tag.height + 10;
+                        testBox.y = yPos;
+                        attempts++;
+                    }
+
+                    tag.x = idealX;
+                    tag.y = yPos;
                     nodesToGroup.push(tag);
 
-                    lastRight_Bottom = xPos + tag.width;
+                    placedTagsBoxes.push(testBox);
 
-                    const targetX = nodeCenterX;
-                    const targetY = data.node.absoluteTransform[1][2] + data.node.height; // Bottom edge of node
-                    const tagX = tag.x + (tag.width / 2);
-                    const tagY = tag.y; // Top edge of tag
+                    const tagAnchorX = tag.x + (tag.width / 2);
+                    const tagAnchorY = tag.y;
+                    const connectorColor = getConnectorColor(data);
 
-                    drawSmartConnector(targetX, targetY, tagX, tagY, UNIFIED_COLOR, nodesToGroup, 'BOTTOM');
+                    drawSmartConnector(data.nodes, tagAnchorX, tagAnchorY, connectorColor, nodesToGroup, 'BOTTOM');
                 }
                 if (nodesToGroup.length > 0) {
                     const group = figma.group(nodesToGroup, figma.currentPage);
@@ -708,115 +986,131 @@ figma.ui.onmessage = async (msg) => {
     }
 };
 
-async function drawSmartConnector(targetX: number, targetY: number, tagX: number, tagY: number, color: RGB, groupArray: SceneNode[], edge: string) {
-    // 1. Dot at target
-    const dot = figma.createEllipse();
-    dot.resize(6, 6);
-    dot.x = targetX - 3;
-    dot.y = targetY - 3;
-    dot.fills = [{ type: 'SOLID', color: color }];
-    groupArray.push(dot);
+async function drawSmartConnector(targetNodes: SceneNode[], tagX: number, tagY: number, color: RGB, groupArray: SceneNode[], edge: string) {
+    // const OFFSET = 20; // Unused in new stepped logic
 
-    // 2. Connector Line logic
-    // User requested symmetrical double-angle: \______/
-    // Path: Start -> Diagonal -> Horizontal/Vertical (Mid) -> Diagonal -> End
+    for (const targetNode of targetNodes) {
+        // Find target anchor point on the node
+        // Use absoluteBoundingBox if possible
+        const bbox = targetNode.absoluteBoundingBox || {
+            x: targetNode.absoluteTransform[0][2],
+            y: targetNode.absoluteTransform[1][2],
+            width: targetNode.width,
+            height: targetNode.height
+        };
 
-    // Vertices
-    const vertices: Vector[] = [];
-    const OFFSET = 20; // How far the diagonal stretches
+        let targetX = 0;
+        let targetY = 0;
 
-    if (edge === 'RIGHT') {
-        // Tag is Right. Target is Left.
-        // Start: Tag Left
-        // End: Target Right
-        // MidY: Average Y to keep horizontal segment centered
-        const midY = (tagY + targetY) / 2;
+        if (edge === 'RIGHT') {
+            // Tag is Right of Node. Node Target is Right Edge.
+            targetX = bbox.x + bbox.width;
+            targetY = bbox.y + (bbox.height / 2);
+        } else if (edge === 'LEFT') {
+            // Tag Left. Node Target Left.
+            targetX = bbox.x;
+            targetY = bbox.y + (bbox.height / 2);
+        } else if (edge === 'TOP') {
+            // Tag Top. Node Target Top.
+            targetX = bbox.x + (bbox.width / 2);
+            targetY = bbox.y;
+        } else if (edge === 'BOTTOM') {
+            // Tag Bottom. Node Target Bottom.
+            targetX = bbox.x + (bbox.width / 2);
+            targetY = bbox.y + bbox.height;
+        }
 
-        // P1: Tag Anchor
-        vertices.push({ x: tagX, y: tagY });
+        // 1. Dot at target
+        const dot = figma.createEllipse();
+        dot.resize(6, 6);
+        dot.x = targetX - 3;
+        dot.y = targetY - 3;
+        dot.fills = [{ type: 'SOLID', color: color }];
+        groupArray.push(dot);
 
-        // P2: Elbow near Tag (Diagonal)
-        // Move Left by OFFSET, Move Y to MidY
-        // Constrain X so we don't cross target
-        const p2X = Math.max(targetX + OFFSET, tagX - OFFSET);
-        vertices.push({ x: p2X, y: midY });
+        // 2. Connector Line logic
+        const vertices: Vector[] = [];
 
-        // P3: Elbow near Target (Horizontal from P2)
-        // X is Target + OFFSET
-        const p3X = Math.min(p2X, targetX + OFFSET);
-        vertices.push({ x: p3X, y: midY });
+        // POLISH: Stepped Diagonal Lines ( ______/ )
+        // Logic: 
+        // 1. Start at Tag (Anchor)
+        // 2. Move Horizontally towards Target (40% of distance)
+        // 3. Diagonal to Target Y
+        // 4. Horizontal to Target X
 
-        // P4: Target Anchor
-        vertices.push({ x: targetX, y: targetY });
+        if (edge === 'RIGHT') {
+            // Tag (Right) -> Target (Left) relative to tag
+            // Dist X is negative (TargetX - TagX)
+
+            const dx = targetX - tagX;
+            // Break points
+            // P1: TagXY
+            // P2: TagX + (dx * 0.4), TagY
+            // P3: TagX + (dx * 0.6), TargetY
+            // P4: TargetXY
+
+            const xBreak1 = tagX + (dx * 0.4);
+            const xBreak2 = tagX + (dx * 0.6);
+
+            vertices.push({ x: tagX, y: tagY });
+            vertices.push({ x: xBreak1, y: tagY });
+            vertices.push({ x: xBreak2, y: targetY }); // Diagonal bridge
+            vertices.push({ x: targetX, y: targetY });
+        }
+        else if (edge === 'LEFT') {
+            // Tag (Left) -> Target (Right) relative to tag
+            // Dist X is positive
+            const dx = targetX - tagX;
+
+            const xBreak1 = tagX + (dx * 0.4);
+            const xBreak2 = tagX + (dx * 0.6);
+
+            vertices.push({ x: tagX, y: tagY });
+            vertices.push({ x: xBreak1, y: tagY });
+            vertices.push({ x: xBreak2, y: targetY });
+            vertices.push({ x: targetX, y: targetY });
+        }
+        else if (edge === 'TOP') {
+            // Vertical Stepped? User asked for diagonal.
+            // Let's apply same logic for Top/Bottom but vertically.
+            // |
+            // \
+            //  |
+
+            const dy = targetY - tagY;
+            const yBreak1 = tagY + (dy * 0.4);
+            const yBreak2 = tagY + (dy * 0.6);
+
+            vertices.push({ x: tagX, y: tagY });
+            vertices.push({ x: tagX, y: yBreak1 });
+            vertices.push({ x: targetX, y: yBreak2 });
+            vertices.push({ x: targetX, y: targetY });
+        }
+        else if (edge === 'BOTTOM') {
+            const dy = targetY - tagY;
+            const yBreak1 = tagY + (dy * 0.4);
+            const yBreak2 = tagY + (dy * 0.6);
+
+            vertices.push({ x: tagX, y: tagY });
+            vertices.push({ x: tagX, y: yBreak1 });
+            vertices.push({ x: targetX, y: yBreak2 });
+            vertices.push({ x: targetX, y: targetY });
+        }
+
+        // Draw
+        try {
+            const line = figma.createVector();
+            line.strokeWeight = 1;
+            line.strokes = [{ type: 'SOLID', color: color }];
+            await line.setVectorNetworkAsync({
+                vertices: vertices,
+                segments: [
+                    { start: 0, end: 1 },
+                    { start: 1, end: 2 },
+                    { start: 2, end: 3 }
+                ]
+            });
+            groupArray.push(line);
+        } catch (e) { console.error("Line draw error", e); }
     }
-    else if (edge === 'LEFT') {
-        // Tag is Left. Target is Right.
-        const midY = (tagY + targetY) / 2;
-
-        // P1: Tag Right
-        vertices.push({ x: tagX, y: tagY });
-
-        // P2: Elbow near Tag
-        const p2X = Math.min(targetX - OFFSET, tagX + OFFSET);
-        vertices.push({ x: p2X, y: midY });
-
-        // P3: Elbow near Target
-        const p3X = Math.max(p2X, targetX - OFFSET);
-        vertices.push({ x: p3X, y: midY });
-
-        // P4: Target
-        vertices.push({ x: targetX, y: targetY });
-    }
-    else if (edge === 'TOP') {
-        // Tag is Top. Target is Bottom.
-        const midX = (tagX + targetX) / 2;
-
-        // P1: Tag Bottom
-        vertices.push({ x: tagX, y: tagY });
-
-        // P2: Elbow near Tag
-        const p2Y = Math.min(targetY - OFFSET, tagY + OFFSET);
-        vertices.push({ x: midX, y: p2Y });
-
-        // P3: Elbow near Target
-        const p3Y = Math.max(p2Y, targetY - OFFSET);
-        vertices.push({ x: midX, y: p3Y });
-
-        // P4: Target
-        vertices.push({ x: targetX, y: targetY });
-    }
-    else if (edge === 'BOTTOM') {
-        // Tag is Bottom. Target is Top.
-        const midX = (tagX + targetX) / 2;
-
-        // P1: Tag Top
-        vertices.push({ x: tagX, y: tagY });
-
-        // P2: Elbow near Tag
-        const p2Y = Math.max(targetY + OFFSET, tagY - OFFSET);
-        vertices.push({ x: midX, y: p2Y });
-
-        // P3: Elbow near Target
-        const p3Y = Math.min(p2Y, targetY + OFFSET);
-        vertices.push({ x: midX, y: p3Y });
-
-        // P4: Target
-        vertices.push({ x: targetX, y: targetY });
-    }
-
-    // Draw
-    try {
-        const line = figma.createVector();
-        line.strokeWeight = 1;
-        line.strokes = [{ type: 'SOLID', color: color }];
-        await line.setVectorNetworkAsync({
-            vertices: vertices,
-            segments: [
-                { start: 0, end: 1 },
-                { start: 1, end: 2 },
-                { start: 2, end: 3 }
-            ]
-        });
-        groupArray.push(line);
-    } catch (e) { console.error("Line draw error", e); }
 }
