@@ -1034,6 +1034,93 @@ figma.ui.onmessage = async (msg) => {
         if (msg.type === 'cancel') {
             figma.closePlugin();
         }
+
+        if (msg.type === 'update-theme') {
+            const themeName = msg.theme;
+            const theme = THEMES[themeName] || THEMES['dark'];
+            console.log("Updating theme to:", themeName);
+
+            // Find all Annotation Groups or Tags on the current page
+            // We look for nodes with name "Annotation Tag" or groups "Annotations - ..."
+            // Recursive search or findAll? findAll is safer.
+
+            const allNodes = figma.currentPage.findAll(n => {
+                if (n.name === "Annotation Tag") return true;
+                if (n.name.startsWith("Annotations - ")) return true;
+                if (n.name === "Header" || n.name === "Body") return true;
+                if (n.type === "VECTOR" && n.parent && n.parent.name.startsWith("Annotations - ")) return true;
+                return false;
+            });
+
+            // Batch updates
+            for (const node of allNodes) {
+                if (node.name === "Header" && node.type === "FRAME") {
+                    node.fills = [{ type: 'SOLID', color: theme.headerFill }];
+                    // Header Text
+                    const text = node.children[0] as TextNode;
+                    if (text && text.type === "TEXT") {
+                        text.fills = [{ type: 'SOLID', color: theme.headerText }];
+                    }
+                }
+                else if (node.name === "Body" && node.type === "FRAME") {
+                    node.fills = [{ type: 'SOLID', color: theme.bodyFill }];
+                    node.strokes = [{ type: 'SOLID', color: theme.bodyStroke }];
+
+                    // Body Rows
+                    for (const row of node.children) {
+                        if (row.type === "FRAME") {
+                            // Row Children: Dot (Ellipse), Text (TextNode)
+                            // We only update Text color and Prefix color range.
+                            // Dot color comes from data, should be preserved.
+
+                            const textNode = row.children.find(c => c.type === "TEXT") as TextNode;
+                            if (textNode) {
+                                // Update primary text color
+                                textNode.fills = [{ type: 'SOLID', color: theme.textPrimary }];
+
+                                // Re-apply Prefix Color (Need to find prefix length... or just guess based on colon?)
+                                // We can't easily know the prefix length without parsing.
+                                // "Prefix: Content"
+                                const fullText = textNode.characters;
+                                const colonIndex = fullText.indexOf(':');
+                                if (colonIndex > -1) {
+                                    textNode.setRangeFills(0, colonIndex, [{ type: 'SOLID', color: theme.prefix }]);
+                                }
+                            }
+                        }
+                    }
+                }
+                else if (node.type === "VECTOR" && node.parent && node.parent.name.startsWith("Annotations - ")) {
+                    // Connector Line
+                    // It's a vector. Update stroke.
+                    // Wait, connector color is determined by the data type (blue, purple, etc.)?
+                    // If so, we SHOULD NOT override it with a single theme connector color.
+                    // The original code used `entry.color` or `connectorColor` passed to `drawSmartConnector`.
+                    // `drawSmartConnector` used `getConnectorColor(data)`.
+
+                    // HOWEVER, in `THEMES`, we have a `connector` color.
+                    // If the user wants the connector to math the theme (e.g. Dark vs Light mode lines), we should update it.
+                    // BUT, if it indicates the type (Fill vs Typography), we should keep it?
+                    // User request: "make theming interactive".
+                    // Usually, functional colors (Error/Success) stay, but structural colors change.
+                    // Our connectors were colored by TYPE (Fill=Blue, Type=Purple).
+                    // So maybe we leave connectors alone?
+                    // OR, does `THEMES.connector` imply a default?
+                    // Let's look at `code.ts` Line 705: `return { r: 0.2, g: 0.6, b: 1 }; // Default Blue`.
+                    // And `drawSmartConnector` uses that color.
+
+                    // If we overwrite all vectors, we lose the type-coding.
+                    // Let's ONLY update if it was the "default" blue? Too hard to track.
+                    // Decision: Leave connectors alone for now as they carry semantic meaning (Color vs Type).
+                    // UNLESS the prompt implies "ALL items reflect new selection".
+                    // Let's assume structural parts (Tag BG, Text) are the main target.
+                }
+            }
+
+            // Re-notify to confirm?
+            // figma.notify("Theme updated"); // Might be too spammy if realtime
+        }
+
     } catch (error) {
         console.error("Plugin Error:", error);
         // @ts-ignore

@@ -82,6 +82,11 @@ const App = () => {
         setOptions(prev => ({ ...prev, [name]: value }));
     };
 
+    // Send theme update message whenever theme changes
+    React.useEffect(() => {
+        parent.postMessage({ pluginMessage: { type: 'update-theme', theme: options.theme } }, '*');
+    }, [options.theme]);
+
     const currentTheme = THEMES[options.theme] || THEMES['dark'];
 
     // Dynamic Styles based on theme
