@@ -492,7 +492,7 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
         const paddingRight = node.paddingRight || 0;
         const paddingTop = node.paddingTop || 0;
         const paddingBottom = node.paddingBottom || 0;
-        const itemSpacing = node.itemSpacing || 0;
+
 
         // Simplify display: 
         // If all padding equal: "P: 16"
@@ -508,14 +508,11 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
             paddingText = `P:${paddingTop} ${paddingRight} ${paddingBottom} ${paddingLeft}`;
         }
 
-        const spacingText = itemSpacing > 0 ? `Gap:${itemSpacing}` : "";
-
-        if (paddingText || spacingText) {
-            const content = [paddingText, spacingText].filter(Boolean).join(" ");
+        if (paddingText) {
             localEntries.push({
                 label: 'Spacing',
                 prefix: 'Layout',
-                content: content,
+                content: paddingText,
                 color: { r: 0.9, g: 0.4, b: 0.5 }, // Pinkish
                 type: 'state' // reuse state color/type or new one
             });
