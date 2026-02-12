@@ -9,7 +9,8 @@ interface AnnotationOptions {
 
 interface AnnotationEntry {
     label: string;
-    text: string;
+    prefix: string;
+    content: string;
     color: RGB;
     type: 'color' | 'typography' | 'state' | 'radius' | 'effect';
 }
@@ -26,6 +27,16 @@ async function loadFonts() {
 }
 
 // Helper: Create an annotation tag
+// Helper: Convert RGB(A) to Hex
+function rgbToHex(r: number, g: number, b: number): string {
+    const toHex = (n: number) => {
+        const hex = Math.round(n * 255).toString(16);
+        return hex.length === 1 ? "0" + hex : hex;
+    };
+    return `#${toHex(r)}${toHex(g)}${toHex(b)}`.toUpperCase();
+}
+
+// Helper: Create an annotation tag
 function createAnnotationTag(entries: AnnotationEntry[]) {
     const frame = figma.createFrame();
     frame.name = "Tag Group";
@@ -38,13 +49,16 @@ function createAnnotationTag(entries: AnnotationEntry[]) {
     frame.paddingBottom = 6;
     frame.cornerRadius = 4;
     frame.itemSpacing = 4;
-    // Unified background color (Dark Grey/Black?) or Blue?
-    // Let's use a nice dark background for high contrast
-    frame.fills = [{ type: 'SOLID', color: { r: 0.15, g: 0.15, b: 0.15 } }];
+
+    // Warm dark background (Dark Brown-Grey)
+    frame.fills = [{ type: 'SOLID', color: { r: 0.18, g: 0.16, b: 0.15 } }];
+    frame.strokes = [{ type: 'SOLID', color: { r: 0.28, g: 0.26, b: 0.25 } }]; // Subtle border
+    frame.strokeWeight = 1;
 
     // Define Order Priority
     const priority: { [key: string]: number } = {
         'Type': 0,
+        'Typography': 0,
         'Fill': 1,
         'Text Color': 2,
         'Text Stroke Color': 3,
@@ -69,20 +83,33 @@ function createAnnotationTag(entries: AnnotationEntry[]) {
         row.itemSpacing = 6;
         row.fills = []; // Transparent
 
-        // Small dot for all types
-        // if (entry.type === 'color') { // Removed check to show for all
+        // Dot
         const dot = figma.createEllipse();
         dot.resize(8, 8);
-        dot.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }];
+        dot.fills = [{ type: 'SOLID', color: entry.color }];
         row.appendChild(dot);
-        // }
 
+        // Text with mixed styling
         const textNode = figma.createText();
-        textNode.characters = entry.text;
+        const fullText = `${entry.prefix}: ${entry.content}`;
+        textNode.characters = fullText;
         textNode.fontSize = 11;
-        textNode.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }];
-        row.appendChild(textNode);
 
+        // Default color (Content) - Off-White
+        textNode.fills = [{ type: 'SOLID', color: { r: 0.9, g: 0.9, b: 0.9 } }];
+
+        // Style the Prefix (Warm Gold/Orange)
+        const prefixEnd = entry.prefix.length + 1; // Include the colon? User said "Type : label"
+        // Let's color the prefix (e.g. "Fill")
+        // Gold: #FFC107 -> {r: 1, g: 0.76, b: 0.03}
+        // Or a softer warm orange: #FFB74D -> {r: 1, g: 0.72, b: 0.3}
+        textNode.setRangeFills(0, entry.prefix.length, [{ type: 'SOLID', color: { r: 1, g: 0.72, b: 0.3 } }]);
+
+        // Ensure bold or medium for prefix?
+        textNode.setRangeFontName(0, entry.prefix.length, { family: "Inter", style: "Medium" });
+        textNode.setRangeFontName(prefixEnd, fullText.length, { family: "Inter", style: "Regular" });
+
+        row.appendChild(textNode);
         frame.appendChild(row);
     }
 
@@ -110,10 +137,14 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
 
     const localEntries: AnnotationEntry[] = [];
 
-    // 1. COLORS (Variables & Styles)
+    // 1. COLORS (Variables & Styles & Explicit)
     if (options.annotateColors) {
-        // A. Fill Variables
+        // A. Fill
+        let fillFound = false;
         if ('fills' in node && (node.fills as Paint[]).length > 0) {
+            const fills = node.fills as Paint[];
+
+            // Check Variables
             // @ts-ignore
             const boundVariables = node.boundVariables;
             if (boundVariables && boundVariables['fills']) {
@@ -126,35 +157,63 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
                                 if (variable) {
                                     localEntries.push({
                                         label: 'Fill',
-                                        text: `Fill: ${variable.name}`,
+                                        prefix: 'Fill',
+                                        content: variable.name,
                                         color: { r: 0.2, g: 0.6, b: 1 },
                                         type: 'color'
                                     });
+                                    fillFound = true;
                                 }
-                            } catch (e) { console.error("Error getting fill variable:", e); }
+                            } catch (e) {
+                                console.error("Error getting fill variable:", e);
+                            }
                         }
                     }
                 }
             }
 
-            // B. Fill Styles
-            if ('fillStyleId' in node && node.fillStyleId && typeof node.fillStyleId === 'string') {
+            // Check Styles (if not found variable)
+            if (!fillFound && 'fillStyleId' in node && node.fillStyleId && typeof node.fillStyleId === 'string') {
                 try {
                     const style = figma.getStyleById(node.fillStyleId);
                     if (style) {
                         localEntries.push({
                             label: 'Fill',
-                            text: `Fill: ${style.name}`,
+                            prefix: 'Fill',
+                            content: style.name,
                             color: { r: 0.2, g: 0.6, b: 1 },
                             type: 'color'
                         });
+                        fillFound = true;
                     }
-                } catch (e) { console.error("Error getting fill style:", e); }
+                } catch (e) {
+                    console.error("Error getting fill style:", e);
+                }
+            }
+
+            // Check Explicit 
+            if (!fillFound) {
+                const fill = fills[0];
+                if (fill.type === 'SOLID') {
+                    const hex = rgbToHex(fill.color.r, fill.color.g, fill.color.b);
+                    const opacity = fill.opacity !== undefined ? Math.round(fill.opacity * 100) + "%" : "100%";
+                    const content = opacity === "100%" ? hex : `${hex} (${opacity})`;
+                    localEntries.push({
+                        label: 'Fill',
+                        prefix: 'Fill',
+                        content: content,
+                        color: fill.color,
+                        type: 'color'
+                    });
+                }
             }
         }
 
-        // C. Stroke Variables & Styles
+        // B. Stroke
+        let strokeFound = false;
         if ('strokes' in node && (node.strokes as Paint[]).length > 0) {
+            const strokes = node.strokes as Paint[];
+
             // Variables
             // @ts-ignore
             const boundVariables = node.boundVariables;
@@ -168,10 +227,12 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
                                 if (variable) {
                                     localEntries.push({
                                         label: 'Stroke Color',
-                                        text: `Stroke Color: ${variable.name}`,
+                                        prefix: 'Stroke',
+                                        content: variable.name,
                                         color: { r: 0.2, g: 0.6, b: 1 },
                                         type: 'color'
                                     });
+                                    strokeFound = true;
                                 }
                             } catch (e) { console.error("Error getting stroke variable:", e); }
                         }
@@ -180,37 +241,81 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
             }
 
             // Styles
-            if ('strokeStyleId' in node && node.strokeStyleId && typeof node.strokeStyleId === 'string') {
+            if (!strokeFound && 'strokeStyleId' in node && node.strokeStyleId && typeof node.strokeStyleId === 'string') {
                 try {
                     const style = figma.getStyleById(node.strokeStyleId);
                     if (style) {
                         localEntries.push({
                             label: 'Stroke Color',
-                            text: `Stroke Color: ${style.name}`,
+                            prefix: 'Stroke',
+                            content: style.name,
                             color: { r: 0.2, g: 0.6, b: 1 },
                             type: 'color'
                         });
+                        strokeFound = true;
                     }
                 } catch (e) { console.error("Error getting stroke style:", e); }
+            }
+
+            // Explicit
+            if (!strokeFound) {
+                const stroke = strokes[0];
+                if (stroke.type === 'SOLID') {
+                    const hex = rgbToHex(stroke.color.r, stroke.color.g, stroke.color.b);
+                    localEntries.push({
+                        label: 'Stroke Color',
+                        prefix: 'Stroke',
+                        content: hex,
+                        color: stroke.color,
+                        type: 'color'
+                    });
+                }
             }
         }
     }
 
-    // 2. TYPOGRAPHY (Styles)
+    // 2. TYPOGRAPHY (Styles & Explicit)
     if (options.annotateTypography) {
         if (node.type === 'TEXT') {
+            let styleFound = false;
+
+            // Check Style
             if (node.textStyleId && typeof node.textStyleId === 'string') {
                 try {
                     const style = figma.getStyleById(node.textStyleId);
                     if (style) {
                         localEntries.push({
                             label: 'Type',
-                            text: `Type: ${style.name}`,
+                            prefix: 'Type',
+                            content: style.name,
                             color: { r: 0.6, g: 0.2, b: 0.8 },
                             type: 'typography'
                         });
+                        styleFound = true;
                     }
                 } catch (e) { console.error("Error getting text style:", e); }
+            }
+
+            // Check Explicit
+            if (!styleFound) {
+                const fontName = node.fontName as FontName; // Assuming not mixed for simplicity or handle mixed
+                const fontSize = node.fontSize;
+                const lineHeight = node.lineHeight;
+
+                if (fontName !== figma.mixed && fontSize !== figma.mixed) {
+                    let lhStr = "Auto";
+                    if (lineHeight !== figma.mixed && lineHeight.unit !== 'AUTO') {
+                        lhStr = Math.round(lineHeight.value) + (lineHeight.unit === 'PERCENT' ? '%' : 'px');
+                    }
+
+                    localEntries.push({
+                        label: 'Type',
+                        prefix: 'Type',
+                        content: `${fontName.family} ${fontName.style} ${fontSize}px/${lhStr}`,
+                        color: { r: 0.6, g: 0.2, b: 0.8 },
+                        type: 'typography'
+                    });
+                }
             }
         }
     }
@@ -230,7 +335,8 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
                 if (stateText) {
                     localEntries.push({
                         label: 'State',
-                        text: `State: ${stateText.trim()}`,
+                        prefix: 'State',
+                        content: stateText.trim(),
                         color: { r: 1, g: 0.6, b: 0.2 },
                         type: 'state'
                     });
@@ -244,7 +350,8 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
         if (node.cornerRadius !== figma.mixed && typeof node.cornerRadius === 'number' && node.cornerRadius > 0) {
             localEntries.push({
                 label: 'Corner Radius',
-                text: `Radius: ${node.cornerRadius}`,
+                prefix: 'Radius',
+                content: `${node.cornerRadius}`,
                 color: { r: 0.2, g: 0.8, b: 0.4 }, // Greenish
                 type: 'radius'
             });
@@ -267,7 +374,8 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
 
                 localEntries.push({
                     label: 'Drop Shadow',
-                    text: `Drop Shadow: X=${effect.offset.x} Y=${effect.offset.y} B=${effect.radius} S=${spread} C=${colorStr}`,
+                    prefix: 'Shadow',
+                    content: `X=${effect.offset.x} Y=${effect.offset.y} B=${effect.radius} S=${spread} ${colorStr}`,
                     color: { r: 0.6, g: 0.4, b: 0.8 }, // Purple-ish
                     type: 'effect'
                 });
@@ -287,7 +395,8 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
                             if (style) {
                                 localEntries.push({
                                     label: 'Type',
-                                    text: `Type: ${style.name}`,
+                                    prefix: 'Type',
+                                    content: style.name,
                                     color: { r: 0.6, g: 0.2, b: 0.8 },
                                     type: 'typography'
                                 });
@@ -312,7 +421,8 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
                                             if (variable) {
                                                 localEntries.push({
                                                     label: 'Text Color',
-                                                    text: `Text Color: ${variable.name}`,
+                                                    prefix: 'Text Color',
+                                                    content: variable.name,
                                                     color: { r: 0.2, g: 0.6, b: 1 },
                                                     type: 'color'
                                                 });
@@ -330,7 +440,8 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
                                 if (style) {
                                     localEntries.push({
                                         label: 'Text Color',
-                                        text: `Text Color: ${style.name}`,
+                                        prefix: 'Text Color',
+                                        content: style.name,
                                         color: { r: 0.2, g: 0.6, b: 1 },
                                         type: 'color'
                                     });
@@ -356,7 +467,8 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
                                             if (variable) {
                                                 localEntries.push({
                                                     label: 'Text Stroke Color',
-                                                    text: `Text Stroke Color: ${variable.name}`,
+                                                    prefix: 'Text Stroke',
+                                                    content: variable.name,
                                                     color: { r: 0.2, g: 0.6, b: 1 },
                                                     type: 'color'
                                                 });
@@ -374,7 +486,8 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
                                 if (style) {
                                     localEntries.push({
                                         label: 'Text Stroke Color',
-                                        text: `Text Stroke Color: ${style.name}`,
+                                        prefix: 'Text Stroke',
+                                        content: style.name,
                                         color: { r: 0.2, g: 0.6, b: 1 },
                                         type: 'color'
                                     });
