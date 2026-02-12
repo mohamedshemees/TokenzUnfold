@@ -1,5 +1,61 @@
 import React, { useState } from 'react';
 
+// Theme Definitions (Mirrored from code.ts for preview)
+interface ThemeColors {
+    containerFill: string;
+    containerStroke: string;
+    headerFill: string;
+    headerText: string;
+    bodyFill: string;
+    bodyStroke: string;
+    textPrimary: string;
+    textSecondary: string;
+    prefix: string;
+    connector: string;
+}
+
+
+
+// Simplified Theme definitions using Hex strings for CSS
+const THEMES: { [key: string]: ThemeColors } = {
+    'dark': {
+        containerFill: '#211C1A', // approx { r: 0.13, g: 0.11, b: 0.1 }
+        containerStroke: '#4D4D4D',
+        headerFill: '#333333',
+        headerText: '#FFFFFF',
+        bodyFill: '#211C1A',
+        bodyStroke: '#4D4D4D',
+        textPrimary: '#E6E6E6',
+        textSecondary: '#999999',
+        prefix: '#FFB84D', // Warm Gold
+        connector: '#3399FF'
+    },
+    'light': {
+        containerFill: '#FAFAFA',
+        containerStroke: '#D9D9D9',
+        headerFill: '#E6E6E6',
+        headerText: '#333333',
+        bodyFill: '#FFFFFF',
+        bodyStroke: '#E6E6E6',
+        textPrimary: '#333333',
+        textSecondary: '#808080',
+        prefix: '#CC6600', // Burnt Orange
+        connector: '#333333'
+    },
+    'blueprint': {
+        containerFill: '#0D1A33', // Deep Blue
+        containerStroke: '#3366CC',
+        headerFill: '#1A3366',
+        headerText: '#66CCFF',
+        bodyFill: '#0D1A33',
+        bodyStroke: '#3366CC',
+        textPrimary: '#CCE6FF',
+        textSecondary: '#6699CC',
+        prefix: '#00FFFF', // Cyan
+        connector: '#00FFFF'
+    }
+};
+
 const App = () => {
     const [options, setOptions] = useState({
         annotateColors: true,
@@ -26,29 +82,74 @@ const App = () => {
         setOptions(prev => ({ ...prev, [name]: value }));
     };
 
+    const currentTheme = THEMES[options.theme] || THEMES['dark'];
+
+    // Dynamic Styles based on theme
+    const containerStyle = {
+        padding: '16px',
+        display: 'flex',
+        flexDirection: 'column' as const,
+        gap: '16px',
+        fontFamily: "'Inter', sans-serif",
+        color: currentTheme.textPrimary,
+        height: '100%',
+        boxSizing: 'border-box' as const,
+        backgroundColor: currentTheme.containerFill, // Reactive BG
+        transition: 'background-color 0.3s, color 0.3s'
+    };
+
+    const cardStyle = {
+        display: 'flex',
+        flexDirection: 'column' as const,
+        gap: '12px',
+        backgroundColor: currentTheme.headerFill, // Reactive Card BG
+        padding: '16px',
+        borderRadius: '8px',
+        boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
+        border: `1px solid ${currentTheme.containerStroke}`,
+        transition: 'background-color 0.3s, border-color 0.3s'
+    };
+
+    const sectionTitleStyle = {
+        fontSize: '12px',
+        fontWeight: 600,
+        color: currentTheme.textSecondary,
+        marginBottom: '4px'
+    };
+
+    const checkboxLabelStyle = {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '10px',
+        fontSize: '13px',
+        cursor: 'pointer',
+        color: currentTheme.textPrimary
+    };
+
+    const inputStyle = {
+        padding: '8px',
+        borderRadius: '6px',
+        border: `1px solid ${currentTheme.containerStroke}`,
+        fontSize: '13px',
+        outline: 'none',
+        backgroundColor: currentTheme.bodyFill,
+        color: currentTheme.textPrimary,
+        cursor: 'pointer'
+    };
+
     return (
-        <div style={{
-            padding: '16px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '16px',
-            fontFamily: "'Inter', sans-serif",
-            color: '#333',
-            height: '100%',
-            boxSizing: 'border-box',
-            backgroundColor: '#F5F5F5' // Light gray background
-        }}>
+        <div style={containerStyle}>
             {/* Header with Icon */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <div style={{
                     width: '32px',
                     height: '32px',
                     borderRadius: '8px',
-                    backgroundColor: '#18A0FB',
+                    backgroundColor: options.theme === 'blueprint' ? '#00FFFF' : '#18A0FB', // Accent color tweak?
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    color: 'white'
+                    color: options.theme === 'blueprint' ? '#000' : 'white'
                 }}>
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M12 19l7-7 3 3-7 7-3-3z"></path>
@@ -57,20 +158,13 @@ const App = () => {
                         <circle cx="11" cy="11" r="2"></circle>
                     </svg>
                 </div>
-                <h2 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>Design Annotator</h2>
+                <h2 style={{ margin: 0, fontSize: '16px', fontWeight: 600, color: currentTheme.headerText }}>Design Annotator</h2>
             </div>
 
             {/* Options Card */}
-            <div style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '12px',
-                backgroundColor: 'white',
-                padding: '16px',
-                borderRadius: '8px',
-                boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
-            }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13px', cursor: 'pointer' }}>
+            <div style={cardStyle}>
+                <div style={sectionTitleStyle}>ANNOTATION OPTIONS</div>
+                <label style={checkboxLabelStyle}>
                     <input
                         type="checkbox"
                         name="annotateColors"
@@ -78,10 +172,10 @@ const App = () => {
                         onChange={handleCheckboxChange}
                         style={{ width: '16px', height: '16px', accentColor: '#18A0FB' }}
                     />
-                    <span>Annotate Colors <span style={{ color: '#888' }}>(Variables)</span></span>
+                    <span>Annotate Colors <span style={{ color: currentTheme.textSecondary }}>(Variables)</span></span>
                 </label>
-                <div style={{ height: '1px', backgroundColor: '#f0f0f0' }}></div>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13px', cursor: 'pointer' }}>
+                <div style={{ height: '1px', backgroundColor: currentTheme.containerStroke }}></div>
+                <label style={checkboxLabelStyle}>
                     <input
                         type="checkbox"
                         name="annotateTypography"
@@ -89,10 +183,10 @@ const App = () => {
                         onChange={handleCheckboxChange}
                         style={{ width: '16px', height: '16px', accentColor: '#18A0FB' }}
                     />
-                    <span>Annotate Typography <span style={{ color: '#888' }}>(Styles)</span></span>
+                    <span>Annotate Typography <span style={{ color: currentTheme.textSecondary }}>(Styles)</span></span>
                 </label>
-                <div style={{ height: '1px', backgroundColor: '#f0f0f0' }}></div>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13px', cursor: 'pointer' }}>
+                <div style={{ height: '1px', backgroundColor: currentTheme.containerStroke }}></div>
+                <label style={checkboxLabelStyle}>
                     <input
                         type="checkbox"
                         name="annotateStates"
@@ -102,28 +196,62 @@ const App = () => {
                     />
                     <span>Annotate Component States</span>
                 </label>
+            </div>
 
-                <div style={{ height: '1px', backgroundColor: '#f0f0f0' }}></div>
-
+            {/* Theme Selection & Preview */}
+            <div style={cardStyle}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <label style={{ fontSize: '12px', fontWeight: 600, color: '#555' }}>Color Theme</label>
+                    <label style={sectionTitleStyle}>APPEARANCE</label>
                     <select
                         name="theme"
                         value={options.theme}
                         onChange={handleSelectChange}
-                        style={{
-                            padding: '8px',
-                            borderRadius: '6px',
-                            border: '1px solid #e0e0e0',
-                            fontSize: '13px',
-                            outline: 'none',
-                            backgroundColor: '#f9f9f9'
-                        }}
+                        style={inputStyle}
                     >
                         <option value="dark">Dark (Default)</option>
                         <option value="light">Light (Clean)</option>
                         <option value="blueprint">Blueprint (Blue)</option>
                     </select>
+                </div>
+
+                {/* Theme Preview Box (Mini Representation) */}
+                <div style={{
+                    marginTop: '4px',
+                    border: `1px solid ${currentTheme.containerStroke}`,
+                    borderRadius: '6px',
+                    overflow: 'hidden',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    fontSize: '11px',
+                    backgroundColor: currentTheme.containerFill
+                }}>
+                    <div style={{
+                        backgroundColor: currentTheme.headerFill,
+                        color: currentTheme.headerText,
+                        padding: '4px 8px',
+                        fontSize: '10px',
+                        fontWeight: 500
+                    }}>
+                        PREVIEW: Button / Primary
+                    </div>
+                    <div style={{
+                        padding: '8px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '6px',
+                        backgroundColor: currentTheme.bodyFill
+                    }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#3399FF' }}></div>
+                            <span style={{ color: currentTheme.prefix, fontWeight: 500 }}>Fill:</span>
+                            <span style={{ color: currentTheme.textPrimary }}>Blue 500</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#9b59b6' }}></div>
+                            <span style={{ color: currentTheme.prefix, fontWeight: 500 }}>Type:</span>
+                            <span style={{ color: currentTheme.textPrimary }}>Inter Medium 14</span>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -132,21 +260,21 @@ const App = () => {
                 <button onClick={onAnnotate} style={{
                     flex: 1,
                     padding: '10px 16px',
-                    backgroundColor: '#18A0FB',
-                    color: 'white',
+                    backgroundColor: options.theme === 'blueprint' ? '#00FFFF' : '#18A0FB',
+                    color: options.theme === 'blueprint' ? '#000' : 'white',
                     border: 'none',
                     borderRadius: '6px',
                     cursor: 'pointer',
                     fontWeight: 600,
                     fontSize: '13px',
                     transition: 'background-color 0.2s',
-                    boxShadow: '0 1px 2px rgba(24, 160, 251, 0.2)'
+                    boxShadow: '0 1px 2px rgba(0,0,0, 0.2)'
                 }}>Annotate Selection</button>
                 <button onClick={onCancel} style={{
                     padding: '10px 16px',
-                    backgroundColor: 'white',
-                    color: '#333',
-                    border: '1px solid #e0e0e0',
+                    backgroundColor: currentTheme.bodyFill,
+                    color: currentTheme.textPrimary,
+                    border: `1px solid ${currentTheme.containerStroke}`,
                     borderRadius: '6px',
                     cursor: 'pointer',
                     fontWeight: 500,

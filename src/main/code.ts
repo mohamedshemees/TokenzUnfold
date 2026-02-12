@@ -1,5 +1,5 @@
 // This shows the HTML page in "ui.html".
-figma.showUI(__html__, { width: 320, height: 300 });
+figma.showUI(__html__, { width: 340, height: 500 });
 
 interface AnnotationOptions {
     annotateColors: boolean;
@@ -859,7 +859,7 @@ figma.ui.onmessage = async (msg) => {
                     const tagAnchorY = tag.y + (tag.height / 2);
                     const connectorColor = getConnectorColor(data);
 
-                    drawSmartConnector(data.nodes, tagAnchorX, tagAnchorY, connectorColor, linesList, 'RIGHT');
+                    await drawSmartConnector(data.nodes, tagAnchorX, tagAnchorY, connectorColor, linesList, 'RIGHT');
                 }
 
                 // --- LEFT EDGE ---
@@ -931,7 +931,7 @@ figma.ui.onmessage = async (msg) => {
                     const tagAnchorY = tag.y + (tag.height / 2);
                     const connectorColor = getConnectorColor(data);
 
-                    drawSmartConnector(data.nodes, tagAnchorX, tagAnchorY, connectorColor, linesList, 'LEFT');
+                    await drawSmartConnector(data.nodes, tagAnchorX, tagAnchorY, connectorColor, linesList, 'LEFT');
                 }
 
                 // --- TOP EDGE ---
@@ -969,7 +969,7 @@ figma.ui.onmessage = async (msg) => {
                     const tagAnchorY = tag.y + tag.height;
                     const connectorColor = getConnectorColor(data);
 
-                    drawSmartConnector(data.nodes, tagAnchorX, tagAnchorY, connectorColor, linesList, 'TOP');
+                    await drawSmartConnector(data.nodes, tagAnchorX, tagAnchorY, connectorColor, linesList, 'TOP');
                 }
 
 
@@ -1006,7 +1006,7 @@ figma.ui.onmessage = async (msg) => {
                     const tagAnchorY = tag.y;
                     const connectorColor = getConnectorColor(data);
 
-                    drawSmartConnector(data.nodes, tagAnchorX, tagAnchorY, connectorColor, linesList, 'BOTTOM');
+                    await drawSmartConnector(data.nodes, tagAnchorX, tagAnchorY, connectorColor, linesList, 'BOTTOM');
                 }
 
                 // Grouping Logic: Ensure Lines are BEHIND Tags
