@@ -15,7 +15,7 @@ interface AnnotationEntry {
     prefix: string;
     content: string;
     color: RGB;
-    type: 'color' | 'typography' | 'state' | 'radius' | 'effect' | 'section_header';
+    type: 'color' | 'typography' | 'state' | 'radius' | 'effect' | 'section_header' | 'content';
 }
 
 
@@ -212,11 +212,13 @@ const createAnnotationTag = (entries: AnnotationEntry[], nodeName: string, theme
         row.itemSpacing = 6;
         row.fills = []; // Transparent
 
-        // Dot
-        const dot = figma.createEllipse();
-        dot.resize(8, 8);
-        dot.fills = [{ type: 'SOLID', color: entry.color }];
-        row.appendChild(dot);
+        // Dot (Skip for Content type)
+        if (entry.type !== 'content') {
+            const dot = figma.createEllipse();
+            dot.resize(8, 8);
+            dot.fills = [{ type: 'SOLID', color: entry.color }];
+            row.appendChild(dot);
+        }
 
         // Text
         const textNode = figma.createText();
@@ -242,6 +244,8 @@ const createAnnotationTag = (entries: AnnotationEntry[], nodeName: string, theme
         body.appendChild(row);
     }
 
+
+
     // Assemble: Header then Body
     // To create the "Notch" look, maybe the header sits on top left?
     // Vertical layout does exactly that.
@@ -250,6 +254,20 @@ const createAnnotationTag = (entries: AnnotationEntry[], nodeName: string, theme
 
     return container;
 };
+
+// Helper: Get Annotation Hash
+function getAnnotationHash(entries: AnnotationEntry[], includeContent: boolean = false): string {
+    // If includeContent is false, filter out 'content' type
+    const filtered = includeContent ? entries : entries.filter(e => e.type !== 'content');
+    const sorted = [...filtered].sort((a, b) => (a.label + a.content).localeCompare(b.label + b.content));
+
+    // DEBUG: Log the components of the hash
+    // console.log("Hashing Entries:", sorted.map(e => `${e.prefix}:${e.content}|${e.type}`));
+
+    return JSON.stringify(sorted.map(e => `${e.prefix}:${e.content}|${e.type}`));
+}
+
+
 // Helper: Check collision between two boxes
 function checkCollision(box1: Box, box2: Box, padding: number = 0): boolean {
     return (
@@ -475,6 +493,19 @@ async function getProperties(node: SceneNode, options: AnnotationOptions): Promi
                 });
             }
         }
+
+        // 3. CONTENT (Text Chars) - Truncated
+        if (node.characters) {
+            const fullChars = node.characters;
+            const truncated = fullChars.length > 25 ? fullChars.substring(0, 25) + "..." : fullChars;
+            localEntries.push({
+                label: 'Content',
+                prefix: 'Text',
+                content: `"${truncated}"`,
+                color: { r: 0.5, g: 0.5, b: 0.5 },
+                type: 'content' // Special type for deduplication exclusion
+            });
+        }
     }
 
     // 3. STATES (Component Properties)
@@ -668,7 +699,7 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
             if (parentProps.length > 0) {
                 mergedEntries.push({
                     label: 'Section',
-                    prefix: node.name, // "Button"
+                    prefix: node.type === 'FRAME' ? 'Button' : 'Container', // Generic Label (Assumption: Frames are buttons/containers)
                     content: '',
                     color: { r: 0, g: 0, b: 0 }, // Unused for header
                     type: 'section_header'
@@ -681,7 +712,7 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
                 if (childProps.length > 0) {
                     mergedEntries.push({
                         label: 'Section',
-                        prefix: child.name, // "Login", "Text"
+                        prefix: child.type === 'TEXT' ? 'Text' : 'Layer', // Generic Label
                         content: '',
                         color: { r: 0, g: 0, b: 0 },
                         type: 'section_header'
@@ -732,9 +763,31 @@ figma.ui.onmessage = async (msg) => {
 
             await loadFonts();
 
+            // --- GLOBAL DEDUPLICATION CONTEXT ---
+            // Initialize provenanceMap ONCE for the entire selection batch
+            const provenanceMap = new Map<string, FrameNode>();
+
+            // Helper to check if a node is our tag
+            const isAnnotationTag = (n: SceneNode): n is FrameNode => {
+                // Check if it's a frame and has our hash data
+                // Also checking name "Annotation Tag" is a good optimization heuristic
+                return n.type === 'FRAME' && n.name === 'Annotation Tag' && n.getPluginData('annotationHash') !== "";
+            };
+
+            // Scan the entire page for existing tags (including nested ones)
+            // findAll is efficient enough for reasonable document sizes
+            const foundTags = figma.currentPage.findAll(isAnnotationTag);
+            for (const tag of foundTags) {
+                const h = tag.getPluginData('annotationHash');
+                if (h) provenanceMap.set(h, tag as FrameNode);
+            }
+
+            console.log("Provenance Map Initialized with", provenanceMap.size, "tags.");
+
             for (const rootNode of selection) {
                 const collectedData: AnnotationData[] = [];
                 const ignoredIds = new Set<string>();
+
                 console.log("Collecting annotations for", rootNode.name);
                 await collectAnnotations(rootNode, msg.options, collectedData, ignoredIds);
                 console.log("Collected items (raw):", collectedData.length);
@@ -744,24 +797,48 @@ figma.ui.onmessage = async (msg) => {
                     continue;
                 }
 
-                // --- DEDUPLICATION ---
+                // --- CLEANUP OLD ANNOTATIONS ---
+                // Check if this node already has an annotation tag linked
+                const existingTagId = rootNode.getPluginData('annotationTagId');
+                if (existingTagId) {
+                    const oldTag = figma.getNodeById(existingTagId);
+                    if (oldTag) {
+                        try {
+                            // CRITICAL FIX: Remove from provenanceMap if present to avoid "Dead Node" access
+                            const oldHash = oldTag.getPluginData('annotationHash');
+                            if (oldHash && provenanceMap.get(oldHash)?.id === oldTag.id) {
+                                provenanceMap.delete(oldHash);
+                            }
+                            oldTag.remove();
+                        } catch (e) {
+                            console.error("Failed to remove old tag:", e);
+                        }
+                    }
+                    // Clear the link on the node
+                    rootNode.setPluginData('annotationTagId', "");
+                }
+
+
+                // --- DEDUPLICATION (Global Page Scan) ---
+                // Provenance Map is now initialized OUTSIDE the loop.
+
+                // --- DEDUPLICATION (Current Selection) ---
                 const uniqueAnnotationsMap = new Map<string, AnnotationData>();
 
                 for (const item of collectedData) {
-                    // Create a unique key based on the entries content
-                    // Sort entries first to ensure consistent key
-                    // We need to compare specific fields, ignore simple object ref diffs
-                    const simpleEntries = item.entries.map(e => `${e.prefix}:${e.content}|${e.type}`).sort();
-                    const key = JSON.stringify(simpleEntries);
+                    // Start with Full Hash (Content + Style) to only merge EXACT duplicates
+                    // Variants (Same Style, Diff Content) will be kept separate here
+                    // and handled by the Smart Linking logic in the placement loops.
+                    const itemHash = getAnnotationHash(item.entries, true);
 
-                    if (uniqueAnnotationsMap.has(key)) {
-                        // Merge nodes
-                        const existing = uniqueAnnotationsMap.get(key);
+                    if (uniqueAnnotationsMap.has(itemHash)) {
+                        // Merge nodes (Exact Duplicate)
+                        const existing = uniqueAnnotationsMap.get(itemHash);
                         if (existing) {
                             existing.nodes.push(...item.nodes);
                         }
                     } else {
-                        uniqueAnnotationsMap.set(key, item);
+                        uniqueAnnotationsMap.set(itemHash, item);
                     }
                 }
 
@@ -771,7 +848,7 @@ figma.ui.onmessage = async (msg) => {
                 // const nodesToGroup: SceneNode[] = []; // Replaced by tagsList and linesList for layering
 
                 // Layout Config
-                const PADDING = 60; // Distance from content bounding box to start of tags
+                const PADDING = 30; // Reduced from 60 to bring annotations closer 
                 const COLLISION_PADDING = 5; // Extra padding for collision detection
                 // const UNIFIED_COLOR = { r: 0.2, g: 0.6, b: 1 }; // Removed in favor of dynamic color
 
@@ -790,33 +867,54 @@ figma.ui.onmessage = async (msg) => {
                 for (const data of deduplicatedData) {
                     const box = getBoundingBox(data.nodes);
 
-                    // Determine which edge is closest to the *center* of the group box
-                    const centerX = box.x + box.width / 2;
-                    const centerY = box.y + box.height / 2;
+                    // Determine distance to each edge (Edge-to-Edge, not Center-to-Edge)
+                    // This fixes the issue where wide elements were incorrectly pushed to Top/Bottom
+                    let distLeft = box.x - frameAbsX;
+                    let distRight = (frameAbsX + frameWidth) - (box.x + box.width);
+                    let distTop = box.y - frameAbsY;
+                    let distBottom = (frameAbsY + frameHeight) - (box.y + box.height);
+                    // --- ZONE-BASED LAYOUT (SCREEN RELATIVE) ---
+                    // User Request: Consistent zones regardless of selection.
+                    // We must calculate position relative to the PARENT SCREEN, not the selection.
 
-                    let distLeft = centerX - frameAbsX;
-                    let distRight = (frameAbsX + frameWidth) - centerX;
-                    let distTop = centerY - frameAbsY;
-                    let distBottom = (frameAbsY + frameHeight) - centerY;
-
-                    // --- POLISH: Edge Preference Bias ---
-                    // Heuristic: Wide elements (Buttons) should prefer Side annotations to avoid vertical stacking.
-                    // Tall elements (Cards) might prefer Top/Bottom naturally.
-                    const aspect = frameWidth / frameHeight;
-                    let sideBias = 1.0;
-
-                    if (aspect > 1.2) {
-                        // Wide element -> Prefer Sides strongly
-                        sideBias = 0.4; // Make sides appear 60% closer
+                    // Find Screen Parent (navigate up until Page child)
+                    let screenParent = rootNode;
+                    let current = rootNode;
+                    while (current.parent && current.parent.type !== 'PAGE' && current.parent.type !== 'DOCUMENT') {
+                        current = current.parent as SceneNode;
                     }
+                    screenParent = current;
 
-                    // Apply bias
-                    distLeft *= sideBias;
-                    distRight *= sideBias;
+                    const screenAbsY = screenParent.absoluteTransform[1][2];
+                    const screenHeight = screenParent.height;
 
-                    // Keep extreme corner preference?
-                    // If very close to edge, maybe fine to keep implicit logic.
-                    // But aspect ratio is generally more robust for shape-based layout.
+                    const centerY = box.y + box.height / 2;
+                    const relativeY = centerY - screenAbsY;
+
+                    // Safety check for zero height or weird nesting
+                    const ratioY = screenHeight > 0 ? relativeY / screenHeight : 0.5;
+
+                    // Apply penalties based on Zones
+                    if (ratioY < 0.3) {
+                        // TOP ZONE (0-30%): Force Top
+                        distLeft *= 10;
+                        distRight *= 10;
+                        distBottom *= 10;
+                        distTop *= 0.1;
+                    } else if (ratioY > 0.7) {
+                        // BOTTOM ZONE (70-100%): Force Bottom
+                        distLeft *= 10;
+                        distRight *= 10;
+                        distTop *= 10;
+                        distBottom *= 0.1;
+                    } else {
+                        // MIDDLE ZONE (30-70%): Force Sides
+                        distTop *= 10;
+                        distBottom *= 10;
+                        // Sides remain natural (closest side wins)
+                        distLeft *= 0.1;
+                        distRight *= 0.1;
+                    }
 
                     const min = Math.min(distLeft, distRight, distTop, distBottom);
 
@@ -939,7 +1037,68 @@ figma.ui.onmessage = async (msg) => {
                 const startX_Right = frameAbsX + frameWidth + PADDING;
 
                 for (const data of right) {
+                    // --- SMART LINKING CHECK ---
+                    // Calculate Hash for this specific data item (Style Only)
+                    const itemHash = getAnnotationHash(data.entries);
+
+                    // DEBUG LOGGING
+                    console.log("Checking Item (RIGHT):", data.nodes[0].name);
+                    console.log("Hash:", itemHash);
+
+                    let existingTag: FrameNode | undefined = provenanceMap.get(itemHash);
+
+                    // Safety Check: Verify tag still exists
+                    if (existingTag) {
+                        try {
+                            if (existingTag.removed || !existingTag.parent) {
+                                console.warn("Tag found in map but removed/invalid. Clearing from map.");
+                                provenanceMap.delete(itemHash);
+                                existingTag = undefined;
+                            }
+                        } catch (e) {
+                            provenanceMap.delete(itemHash);
+                            existingTag = undefined;
+                        }
+                    }
+
+                    console.log("Existing Tag found?", existingTag ? "YES" : "NO");
+
+                    if (existingTag) {
+                        console.log("-> MATCH FOUND! Reusing tag:", existingTag.id);
+                        // REUSE EXISTING TAG for Styles!
+                        // 1. Draw connector to Main Tag (Styles)
+                        const tagBox = { x: existingTag.x, y: existingTag.y, width: existingTag.width, height: existingTag.height };
+                        const tagAnchorX = tagBox.x;
+                        const tagAnchorY = tagBox.y + (tagBox.height / 2);
+
+                        const connectorColor = getConnectorColor(data);
+                        await drawSmartConnector(data.nodes, tagAnchorX, tagAnchorY, connectorColor, linesList, 'RIGHT');
+
+                        // 2. Create MINI TAG for Unique Content (if any)
+                        const contentEntries = data.entries.filter(e => e.type === 'content');
+                        if (contentEntries.length > 0) {
+                            const miniTag = createAnnotationTag(contentEntries, "", currentTheme);
+                            // Place near the object (Right Side)
+                            const objectBox = getBoundingBox(data.nodes);
+                            miniTag.x = objectBox.x + objectBox.width + 20; // Closer than main tags
+                            miniTag.y = objectBox.y + (objectBox.height / 2) - (miniTag.height / 2);
+                            tagsList.push(miniTag);
+
+                            // Optional: Connector to mini tag? Or just proximity.
+                            // Proximity is cleaner for "Label". 
+                        }
+
+                        for (const n of data.nodes) {
+                            n.setPluginData('annotationTagId', existingTag.id);
+                        }
+                        continue; // SKIP Full Tag Creation
+                    } else {
+                        console.log("-> NO MATCH. Creating new tag.");
+                    }
+
                     const tag = createAnnotationTag(data.entries, data.nodes[0].name, currentTheme);
+                    tag.setPluginData('annotationHash', itemHash);
+                    provenanceMap.set(itemHash, tag);
                     const tagBoxBox = getBoundingBox(data.nodes);
                     const nodeCenterY = tagBoxBox.y + (tagBoxBox.height / 2);
 
@@ -956,7 +1115,7 @@ figma.ui.onmessage = async (msg) => {
                     let currentColumnX = xPos;
                     let attempts = 0;
 
-                    const VERTICAL_SEARCH_RANGE = 150; // Search up/down 150px
+                    const VERTICAL_SEARCH_RANGE = 5000; // Search up/down 5000px (Effective Infinite)
                     const VERTICAL_STEP = tag.height + 4; // Step by tag height + gap
 
                     while (!placed && attempts < 20) {
@@ -996,9 +1155,15 @@ figma.ui.onmessage = async (msg) => {
                             placedTagsBoxes.push({ x: currentColumnX, y: bestY, width: tag.width, height: tag.height });
                             placed = true;
                         } else {
-                            // No spot in this column, move outwards
+                            // No spot in this column.
+                            // User request: "closer". Don't move outwards.
+                            // Just break and let fallback place it at idealY (overlapping is better than flying away).
+                            break;
+                            /*
+                            // OLD LOGIC: Move Outwards
                             currentColumnX += tag.width + 10;
                             attempts++;
+                            */
                         }
                     }
 
@@ -1007,6 +1172,11 @@ figma.ui.onmessage = async (msg) => {
                         tag.x = currentColumnX;
                         tag.y = idealY;
                         placedTagsBoxes.push({ x: currentColumnX, y: idealY, width: tag.width, height: tag.height });
+                    }
+
+                    // Save Plugin Data on Nodes
+                    for (const n of data.nodes) {
+                        n.setPluginData('annotationTagId', tag.id);
                     }
 
                     tagsList.push(tag);
@@ -1024,7 +1194,35 @@ figma.ui.onmessage = async (msg) => {
                 const startX_Left = frameAbsX - PADDING;
 
                 for (const data of left) {
+                    // --- SMART LINKING CHECK ---
+                    const itemHash = getAnnotationHash(data.entries);
+                    let existingTag: FrameNode | undefined = provenanceMap.get(itemHash);
+
+                    // Safety check
+                    if (existingTag) {
+                        try { if (existingTag.removed || !existingTag.parent) { provenanceMap.delete(itemHash); existingTag = undefined; } } catch (e) { provenanceMap.delete(itemHash); existingTag = undefined; }
+                    }
+
+                    if (existingTag) {
+                        const tagBox = { x: existingTag.x, y: existingTag.y, width: existingTag.width, height: existingTag.height };
+                        const tagAnchorX = tagBox.x + tagBox.width; // Right side for Left connector source? 
+                        // Wait, if tag is reused, it might be anywhere.
+                        // If existing tag is to the RIGHT, and we are creating a LEFT line... implies crossing?
+                        // Ideally we pick the closest side of the tag.
+                        // Simple: Center?
+                        const tagAnchorY = tagBox.y + (tagBox.height / 2);
+
+                        const connectorColor = getConnectorColor(data);
+                        await drawSmartConnector(data.nodes, tagAnchorX, tagAnchorY, connectorColor, linesList, 'LEFT');
+
+                        for (const n of data.nodes) n.setPluginData('annotationTagId', existingTag.id);
+                        continue;
+                    }
+
                     const tag = createAnnotationTag(data.entries, data.nodes[0].name, currentTheme);
+                    tag.setPluginData('annotationHash', itemHash);
+                    provenanceMap.set(itemHash, tag);
+
                     const tagBoxBox = getBoundingBox(data.nodes);
                     const nodeCenterY = tagBoxBox.y + (tagBoxBox.height / 2);
 
@@ -1037,7 +1235,7 @@ figma.ui.onmessage = async (msg) => {
                     let currentColumnX = xPos;
                     let attempts = 0;
 
-                    const VERTICAL_SEARCH_RANGE = 150;
+                    const VERTICAL_SEARCH_RANGE = 5000; // Fixed: Increased from 150
                     const VERTICAL_STEP = tag.height + 4;
 
                     while (!placed && attempts < 20) {
@@ -1069,9 +1267,14 @@ figma.ui.onmessage = async (msg) => {
                             placedTagsBoxes.push({ x: currentColumnX, y: bestY, width: tag.width, height: tag.height });
                             placed = true;
                         } else {
+                            // No spot in this column.
+                            // User request: "closer". Don't move outwards.
+                            break;
+                            /* 
                             // Move Outwards (Left)
                             currentColumnX -= (tag.width + 10);
                             attempts++;
+                            */
                         }
                     }
 
@@ -1080,6 +1283,8 @@ figma.ui.onmessage = async (msg) => {
                         tag.y = idealY;
                         placedTagsBoxes.push({ x: currentColumnX, y: idealY, width: tag.width, height: tag.height });
                     }
+
+                    for (const n of data.nodes) n.setPluginData('annotationTagId', tag.id);
 
                     tagsList.push(tag);
 
@@ -1096,7 +1301,29 @@ figma.ui.onmessage = async (msg) => {
                 const startY_Top_Real = frameAbsY - PADDING;
 
                 for (const data of top) {
+                    // --- SMART LINKING CHECK ---
+                    const itemHash = getAnnotationHash(data.entries);
+                    let existingTag: FrameNode | undefined = provenanceMap.get(itemHash);
+
+                    // Safety check
+                    if (existingTag) {
+                        try { if (existingTag.removed || !existingTag.parent) { provenanceMap.delete(itemHash); existingTag = undefined; } } catch (e) { provenanceMap.delete(itemHash); existingTag = undefined; }
+                    }
+
+                    if (existingTag) {
+                        const tagBox = { x: existingTag.x, y: existingTag.y, width: existingTag.width, height: existingTag.height };
+                        const tagAnchorX = tagBox.x + (tagBox.width / 2);
+                        const tagAnchorY = tagBox.y + tagBox.height;
+                        const connectorColor = getConnectorColor(data);
+
+                        await drawSmartConnector(data.nodes, tagAnchorX, tagAnchorY, connectorColor, linesList, 'TOP');
+                        for (const n of data.nodes) n.setPluginData('annotationTagId', existingTag.id);
+                        continue;
+                    }
+
                     const tag = createAnnotationTag(data.entries, data.nodes[0].name, currentTheme);
+                    tag.setPluginData('annotationHash', itemHash);
+                    provenanceMap.set(itemHash, tag);
                     const box = getBoundingBox(data.nodes);
                     const centerX = box.x + box.width / 2;
 
@@ -1135,7 +1362,32 @@ figma.ui.onmessage = async (msg) => {
                 const startY_Bottom = frameAbsY + frameHeight + PADDING;
 
                 for (const data of bottom) {
+                    // --- SMART LINKING CHECK ---
+                    // Calculate Hash for this specific data item (Style Only)
+                    const itemHash = getAnnotationHash(data.entries);
+                    let existingTag: FrameNode | undefined = provenanceMap.get(itemHash);
+
+                    // Safety check
+                    if (existingTag) {
+                        try { if (existingTag.removed || !existingTag.parent) { provenanceMap.delete(itemHash); existingTag = undefined; } } catch (e) { provenanceMap.delete(itemHash); existingTag = undefined; }
+                    }
+
+                    if (existingTag) {
+                        const tagBox = { x: existingTag.x, y: existingTag.y, width: existingTag.width, height: existingTag.height };
+                        const tagAnchorX = tagBox.x + (tagBox.width / 2);
+                        const tagAnchorY = tagBox.y;
+
+                        const connectorColor = getConnectorColor(data);
+                        await drawSmartConnector(data.nodes, tagAnchorX, tagAnchorY, connectorColor, linesList, 'BOTTOM');
+
+                        // Clean up old tag data if any?
+                        for (const n of data.nodes) n.setPluginData('annotationTagId', existingTag.id);
+                        continue;
+                    }
+
                     const tag = createAnnotationTag(data.entries, data.nodes[0].name, currentTheme);
+                    tag.setPluginData('annotationHash', itemHash);
+                    provenanceMap.set(itemHash, tag);
                     const box = getBoundingBox(data.nodes);
                     const centerX = box.x + box.width / 2;
 
@@ -1327,86 +1579,74 @@ async function drawSmartConnector(targetNodes: SceneNode[], tagX: number, tagY: 
         groupArray.push(dot);
 
         // 2. Connector Line logic
-        const vertices: Vector[] = [];
+        // 2. Connector Line logic - ORTHOGONAL L-SHAPE with Rounded Corner
+        const vertices: VectorVertex[] = [];
+        const segments: VectorSegment[] = [];
 
-        // POLISH: Stepped Diagonal Lines ( ______/ )
-        // Logic: 
-        // 1. Start at Tag (Anchor)
-        // 2. Move Horizontally towards Target (40% of distance)
-        // 3. Diagonal to Target Y
-        // 4. Horizontal to Target X
+        const CORNER_RADIUS = 10;
 
-        if (edge === 'RIGHT') {
-            // Tag (Right) -> Target (Left) relative to tag
-            // Dist X is negative (TargetX - TagX)
-
-            const dx = targetX - tagX;
-            // Break points
-            // P1: TagXY
-            // P2: TagX + (dx * 0.4), TagY
-            // P3: TagX + (dx * 0.6), TargetY
-            // P4: TargetXY
-
-            const xBreak1 = tagX + (dx * 0.4);
-            const xBreak2 = tagX + (dx * 0.6);
-
-            vertices.push({ x: tagX, y: tagY });
-            vertices.push({ x: xBreak1, y: tagY });
-            vertices.push({ x: xBreak2, y: targetY }); // Diagonal bridge
-            vertices.push({ x: targetX, y: targetY });
-        }
-        else if (edge === 'LEFT') {
-            // Tag (Left) -> Target (Right) relative to tag
-            // Dist X is positive
-            const dx = targetX - tagX;
-
-            const xBreak1 = tagX + (dx * 0.4);
-            const xBreak2 = tagX + (dx * 0.6);
-
-            vertices.push({ x: tagX, y: tagY });
-            vertices.push({ x: xBreak1, y: tagY });
-            vertices.push({ x: xBreak2, y: targetY });
-            vertices.push({ x: targetX, y: targetY });
-        }
-        else if (edge === 'TOP') {
-            // Vertical Stepped? User asked for diagonal.
-            // Let's apply same logic for Top/Bottom but vertically.
-            // |
-            // \
-            //  |
-
-            const dy = targetY - tagY;
-            const yBreak1 = tagY + (dy * 0.4);
-            const yBreak2 = tagY + (dy * 0.6);
-
-            vertices.push({ x: tagX, y: tagY });
-            vertices.push({ x: tagX, y: yBreak1 });
-            vertices.push({ x: targetX, y: yBreak2 });
-            vertices.push({ x: targetX, y: targetY });
-        }
-        else if (edge === 'BOTTOM') {
-            const dy = targetY - tagY;
-            const yBreak1 = tagY + (dy * 0.4);
-            const yBreak2 = tagY + (dy * 0.6);
-
-            vertices.push({ x: tagX, y: tagY });
-            vertices.push({ x: tagX, y: yBreak1 });
-            vertices.push({ x: targetX, y: yBreak2 });
-            vertices.push({ x: targetX, y: targetY });
-        }
-
-        // Draw
         try {
             const line = figma.createVector();
             line.strokeWeight = 1;
             line.strokes = [{ type: 'SOLID', color: color }];
+
+            if (edge === 'RIGHT' || edge === 'LEFT') {
+                // Horizontal First, then Vertical
+                // Start: Tag (x,y)
+                // Corner: (TargetX, TagY)
+                // End: (TargetX, TargetY)
+
+                // Adjust for direction
+                // If Tag is Right of Target (Edge=Left): TagX > TargetX.
+                // If Tag is Left of Target (Edge=Right): TagX < TargetX.
+
+                // Let's use a simple 3-point L-shape
+                // P1: Tag Anchor
+                // P2: Corner (TargetX, TagY)
+                // P3: Target Anchor
+
+                // NOTE: If TagY is very close to TargetY, simple line.
+                if (Math.abs(tagY - targetY) < 2) {
+                    vertices.push({ x: tagX, y: tagY });
+                    vertices.push({ x: targetX, y: targetY });
+                    segments.push({ start: 0, end: 1 });
+                } else {
+                    // L-Shape
+                    // We need a "Mid" point for the corner radius? 
+                    // VectorNetwork doesn't support automatic corner radius on polyline easily without explicit handle control points or cornerRadius property if available.
+                    // Checking Figma API: VectorVertex has cornerRadius!
+
+                    vertices.push({ x: tagX, y: tagY }); // Start
+                    vertices.push({ x: targetX, y: tagY, cornerRadius: CORNER_RADIUS }); // Corner with Radius
+                    vertices.push({ x: targetX, y: targetY }); // End
+
+                    segments.push({ start: 0, end: 1 });
+                    segments.push({ start: 1, end: 2 });
+                }
+
+            } else {
+                // Top/Bottom -> Vertical First, then Horizontal
+                // P1: Tag Anchor
+                // P2: Corner (TagX, TargetY)
+                // P3: Target Anchor
+
+                if (Math.abs(tagX - targetX) < 2) {
+                    vertices.push({ x: tagX, y: tagY });
+                    vertices.push({ x: targetX, y: targetY });
+                    segments.push({ start: 0, end: 1 });
+                } else {
+                    vertices.push({ x: tagX, y: tagY }); // Start
+                    vertices.push({ x: tagX, y: targetY, cornerRadius: CORNER_RADIUS }); // Corner
+                    vertices.push({ x: targetX, y: targetY }); // End
+
+                    segments.push({ start: 0, end: 1 });
+                    segments.push({ start: 1, end: 2 });
+                }
+            }
+
             await line.setVectorNetworkAsync({
                 vertices: vertices,
-                segments: [
-                    { start: 0, end: 1 },
-                    { start: 1, end: 2 },
-                    { start: 2, end: 3 }
-                ]
+                segments: segments
             });
             groupArray.push(line);
         } catch (e) { console.error("Line draw error", e); }
