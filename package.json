@@ -5,8 +5,9 @@
   "type": "module",
   "main": "dist/code.js",
   "scripts": {
-    "build": "npm run build:ui && npm run build:main",
+    "build": "npm run build:ui && npm run build:main:release",
     "build:main": "esbuild src/main/code.ts --bundle --outfile=dist/code.js --target=es6",
+    "build:main:release": "esbuild src/main/code.ts --bundle --outfile=dist/code.js --target=es6 --minify",
     "build:ui": "vite build --emptyOutDir=false",
     "watch": "npm run build:ui -- --watch & npm run build:main -- --watch"
   },

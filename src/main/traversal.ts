@@ -1,5 +1,5 @@
 import { AnnotationOptions, AnnotationEntry, AnnotationData } from "./types";
-import { rgbToHex } from "./utils";
+import { rgbToHex, loadSpecificFont } from "./utils";
 
 /**
  * Helper: Get properties for a single node
@@ -139,6 +139,12 @@ export async function getProperties(node: SceneNode, options: AnnotationOptions)
     // 2. TYPOGRAPHY
     if (options.annotateTypography && node.type === "TEXT") {
         let typeFound = false;
+
+        // Load the node's font before accessing properties to prevent errors
+        if (node.fontName !== figma.mixed) {
+            await loadSpecificFont(node.fontName as FontName);
+        }
+
         if (node.textStyleId && typeof node.textStyleId === 'string') {
             try {
                 const style = figma.getStyleById(node.textStyleId);
@@ -256,10 +262,10 @@ export async function getProperties(node: SceneNode, options: AnnotationOptions)
     if (options.annotateRadius && 'cornerRadius' in node) {
         let radiusDisplay = "";
         // @ts-ignore
-        const boundVariables = node.boundVariables;
-        if (boundVariables && boundVariables['cornerRadius']) {
+        const boundVariables = node.boundVariables as any;
+        if (boundVariables && boundVariables.cornerRadius) {
             try {
-                const v = await figma.variables.getVariableByIdAsync(boundVariables['cornerRadius'].id);
+                const v = await figma.variables.getVariableByIdAsync(boundVariables.cornerRadius.id);
                 if (v) radiusDisplay = v.name;
             } catch (e) { }
         }
@@ -324,6 +330,7 @@ export async function collectAnnotations(
     collected: AnnotationData[],
     ignoredIds: Set<string>
 ) {
+    if (node.removed) return; // SAFETY: Node might have been deleted
     if (ignoredIds.has(node.id)) return;
     if ('visible' in node && !node.visible) return;
 

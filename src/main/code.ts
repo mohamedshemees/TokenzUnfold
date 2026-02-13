@@ -1,4 +1,4 @@
-import { AnnotationOptions, AnnotationData, Box } from "./types";
+import { AnnotationData, Box } from "./types";
 import { THEMES } from "./theme";
 import {
     loadFonts,
@@ -25,21 +25,33 @@ figma.ui.onmessage = async (msg) => {
                 return;
             }
 
+            // Check if any selection is a component or instance (Informational)
+            const hasComponents = selection.some(n => n.type === 'COMPONENT' || n.type === 'INSTANCE' || n.type === 'COMPONENT_SET');
+            if (hasComponents) {
+                console.log("Selection contains components/instances. Annotation tags will be created as top-level nodes on the current page.");
+            }
+
             await loadFonts();
 
             // --- GLOBAL DEDUPLICATION CONTEXT ---
             const provenanceMap = new Map<string, FrameNode>();
 
-            // Scan the entire page for existing tags
-            const foundTags = figma.currentPage.findAll(isAnnotationTag);
-            for (const tag of foundTags) {
-                const h = tag.getPluginData('annotationHash');
-                if (h) provenanceMap.set(h, tag as FrameNode);
+            // Scan the entire page for existing tags with safety
+            try {
+                const foundTags = figma.currentPage.findAll(isAnnotationTag);
+                for (const tag of foundTags) {
+                    if (tag.removed) continue;
+                    const h = tag.getPluginData('annotationHash');
+                    if (h) provenanceMap.set(h, tag as FrameNode);
+                }
+            } catch (e) {
+                console.error("Error during global tag scan:", e);
             }
 
             console.log("Provenance Map Initialized with", provenanceMap.size, "tags.");
 
             for (const rootNode of selection) {
+                if (rootNode.removed) continue; // Safety check
                 const collectedData: AnnotationData[] = [];
                 const ignoredIds = new Set<string>();
 

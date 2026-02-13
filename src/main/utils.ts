@@ -56,12 +56,23 @@ export function getBoundingBox(nodes: SceneNode[]): Box {
 }
 
 /**
- * Helper: load Fonts
+ * Helper: load specific font
+ */
+export async function loadSpecificFont(font: FontName) {
+    try {
+        await figma.loadFontAsync(font);
+    } catch (e) {
+        console.warn(`Failed to load font: ${font.family} ${font.style}. Using fallback.`, e);
+    }
+}
+
+/**
+ * Helper: load default Fonts
  */
 export async function loadFonts() {
-    await figma.loadFontAsync({ family: "Inter", style: "Regular" });
-    await figma.loadFontAsync({ family: "Inter", style: "Medium" });
-    await figma.loadFontAsync({ family: "Inter", style: "Bold" });
+    await loadSpecificFont({ family: "Inter", style: "Regular" });
+    await loadSpecificFont({ family: "Inter", style: "Medium" });
+    await loadSpecificFont({ family: "Inter", style: "Bold" });
 }
 
 /**
