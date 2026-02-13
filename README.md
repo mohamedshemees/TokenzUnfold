@@ -44,7 +44,7 @@ An intelligent Figma plugin that automatically generates design annotations for 
 
 1.  **Clone the Repository**
     ```bash
-    git clone https://github.com/your-username/TokenzUnfold.git
+    git clone https://github.com/mohamedshemees/TokenzUnfold.git
     cd TokenzUnfold
     ```
 
@@ -99,17 +99,11 @@ The plugin logic is located in `src/main/` and is split into specialized modules
 
 Found a bug or have a feature request? Let us know!
 
-1.  Go to the [Issues](https://github.com/your-username/figma-design-annotator/issues) tab.
+1.  Go to the [Issues](https://github.com/mohamedshemees/TokenzUnfold/issues) tab.
 2.  Search if a similar issue already exists.
 3.  If not, click **New Issue**.
 4.  Include a clear description, steps to reproduce, and screenshots if applicable.
 
----
 
-## 📜 License
-
-This project is licensed under the **ISC License**. See the `LICENSE` file for details (if added).
-
----
 
 *Handcrafted with ❤️ to make design handoff a breeze.*
