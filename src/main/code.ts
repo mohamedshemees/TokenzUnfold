@@ -5,6 +5,9 @@ interface AnnotationOptions {
     annotateColors: boolean;
     annotateTypography: boolean;
     annotateStates: boolean;
+    annotateEffects: boolean;
+    annotateRadius: boolean;
+    annotateLayout: boolean;
 }
 
 interface AnnotationEntry {
@@ -12,8 +15,11 @@ interface AnnotationEntry {
     prefix: string;
     content: string;
     color: RGB;
-    type: 'color' | 'typography' | 'state' | 'radius' | 'effect';
+    type: 'color' | 'typography' | 'state' | 'radius' | 'effect' | 'section_header';
 }
+
+
+
 
 interface AnnotationData {
     nodes: SceneNode[]; // Array for deduplication
@@ -160,13 +166,45 @@ const createAnnotationTag = (entries: AnnotationEntry[], nodeName: string, theme
         'State': 7
     };
 
-    const sortedEntries = [...entries].sort((a, b) => {
-        const pA = priority[a.label] !== undefined ? priority[a.label] : 99;
-        const pB = priority[b.label] !== undefined ? priority[b.label] : 99;
-        return pA - pB;
-    });
+    const hasSections = entries.some(e => e.type === 'section_header');
+
+    let sortedEntries = [...entries];
+    if (!hasSections) {
+        sortedEntries.sort((a, b) => {
+            const pA = priority[a.label] !== undefined ? priority[a.label] : 99;
+            const pB = priority[b.label] !== undefined ? priority[b.label] : 99;
+            return pA - pB;
+        });
+    }
 
     for (const entry of sortedEntries) {
+        if (entry.type === 'section_header') {
+            // Section Header Rendering
+            const headerRow = figma.createFrame();
+            headerRow.layoutMode = "HORIZONTAL";
+            headerRow.counterAxisSizingMode = "AUTO";
+            headerRow.primaryAxisSizingMode = "AUTO";
+            headerRow.paddingTop = 4;
+            headerRow.paddingBottom = 2;
+            headerRow.fills = [];
+
+            const headerText = figma.createText();
+            headerText.characters = entry.prefix; // "Button", "Text"
+            headerText.fontSize = 11;
+            headerText.fills = [{ type: 'SOLID', color: theme.textPrimary }]; // Use primary text color
+
+            // Bold the header
+            try {
+                // Determine style based on current font or default
+                // Assuming "Inter" "Bold" is available or standard
+                headerText.fontName = { family: "Inter", style: "Bold" };
+            } catch (e) { }
+
+            headerRow.appendChild(headerText);
+            body.appendChild(headerRow);
+            continue;
+        }
+
         const row = figma.createFrame();
         row.layoutMode = "HORIZONTAL";
         row.counterAxisSizingMode = "AUTO";
@@ -256,14 +294,9 @@ function getBoundingBox(nodes: SceneNode[]): Box {
     };
 }
 
-// Recursive traversal to Collect Data
-async function collectAnnotations(node: SceneNode, options: AnnotationOptions, collected: AnnotationData[], ignoredIds: Set<string>) {
-    if (ignoredIds.has(node.id)) return;
-    if ('visible' in node && !node.visible) return; // IGNORE HIDDEN ELEMENTS per user request
-    // console.log("Processing node:", node.name, node.type);
-
+// Helper: Get properties for a single node
+async function getProperties(node: SceneNode, options: AnnotationOptions): Promise<AnnotationEntry[]> {
     const localEntries: AnnotationEntry[] = [];
-    const involvedNodes: SceneNode[] = [node];
 
     // 1. COLORS (Variables & Styles & Explicit)
     if (options.annotateColors) {
@@ -284,17 +317,15 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
                                 const variable = await figma.variables.getVariableByIdAsync(v.id);
                                 if (variable) {
                                     localEntries.push({
-                                        label: 'Fill',
-                                        prefix: 'Fill',
+                                        label: node.type === 'TEXT' ? 'Text Color' : 'Fill',
+                                        prefix: node.type === 'TEXT' ? 'Text Color' : 'Fill',
                                         content: variable.name,
                                         color: { r: 0.2, g: 0.6, b: 1 },
                                         type: 'color'
                                     });
                                     fillFound = true;
                                 }
-                            } catch (e) {
-                                console.error("Error getting fill variable:", e);
-                            }
+                            } catch (e) { }
                         }
                     }
                 }
@@ -306,17 +337,15 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
                     const style = figma.getStyleById(node.fillStyleId);
                     if (style) {
                         localEntries.push({
-                            label: 'Fill',
-                            prefix: 'Fill',
+                            label: node.type === 'TEXT' ? 'Text Color' : 'Fill',
+                            prefix: node.type === 'TEXT' ? 'Text Color' : 'Fill',
                             content: style.name,
                             color: { r: 0.2, g: 0.6, b: 1 },
                             type: 'color'
                         });
                         fillFound = true;
                     }
-                } catch (e) {
-                    console.error("Error getting fill style:", e);
-                }
+                } catch (e) { }
             }
 
             // Check Explicit 
@@ -327,8 +356,8 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
                     const opacity = fill.opacity !== undefined ? Math.round(fill.opacity * 100) + "%" : "100%";
                     const content = opacity === "100%" ? hex : `${hex} (${opacity})`;
                     localEntries.push({
-                        label: 'Fill',
-                        prefix: 'Fill',
+                        label: node.type === 'TEXT' ? 'Text Color' : 'Fill',
+                        prefix: node.type === 'TEXT' ? 'Text Color' : 'Fill',
                         content: content,
                         color: fill.color,
                         type: 'color'
@@ -362,7 +391,7 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
                                     });
                                     strokeFound = true;
                                 }
-                            } catch (e) { console.error("Error getting stroke variable:", e); }
+                            } catch (e) { }
                         }
                     }
                 }
@@ -382,7 +411,7 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
                         });
                         strokeFound = true;
                     }
-                } catch (e) { console.error("Error getting stroke style:", e); }
+                } catch (e) { }
             }
 
             // Explicit
@@ -390,10 +419,12 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
                 const stroke = strokes[0];
                 if (stroke.type === 'SOLID') {
                     const hex = rgbToHex(stroke.color.r, stroke.color.g, stroke.color.b);
+                    const opacity = stroke.opacity !== undefined ? Math.round(stroke.opacity * 100) + "%" : "100%";
+                    const content = opacity === "100%" ? hex : `${hex} (${opacity})`;
                     localEntries.push({
                         label: 'Stroke Color',
                         prefix: 'Stroke',
-                        content: hex,
+                        content: content,
                         color: stroke.color,
                         type: 'color'
                     });
@@ -402,48 +433,46 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
         }
     }
 
-    // 2. TYPOGRAPHY (Styles & Explicit)
-    if (options.annotateTypography) {
-        if (node.type === 'TEXT') {
-            let styleFound = false;
+    // 2. TYPOGRAPHY
+    if (options.annotateTypography && node.type === "TEXT") {
+        let typeFound = false;
 
-            // Check Style
-            if (node.textStyleId && typeof node.textStyleId === 'string') {
-                try {
-                    const style = figma.getStyleById(node.textStyleId);
-                    if (style) {
-                        localEntries.push({
-                            label: 'Type',
-                            prefix: 'Type',
-                            content: style.name,
-                            color: { r: 0.6, g: 0.2, b: 0.8 },
-                            type: 'typography'
-                        });
-                        styleFound = true;
-                    }
-                } catch (e) { console.error("Error getting text style:", e); }
-            }
-
-            // Check Explicit
-            if (!styleFound) {
-                const fontName = node.fontName as FontName; // Assuming not mixed for simplicity or handle mixed
-                const fontSize = node.fontSize;
-                const lineHeight = node.lineHeight;
-
-                if (fontName !== figma.mixed && fontSize !== figma.mixed) {
-                    let lhStr = "Auto";
-                    if (lineHeight !== figma.mixed && lineHeight.unit !== 'AUTO') {
-                        lhStr = Math.round(lineHeight.value) + (lineHeight.unit === 'PERCENT' ? '%' : 'px');
-                    }
-
+        // Check Style
+        if (node.textStyleId && typeof node.textStyleId === 'string') {
+            try {
+                const style = figma.getStyleById(node.textStyleId);
+                if (style) {
                     localEntries.push({
-                        label: 'Type',
-                        prefix: 'Type',
-                        content: `${fontName.family} ${fontName.style} ${fontSize}px/${lhStr}`,
-                        color: { r: 0.6, g: 0.2, b: 0.8 },
+                        label: 'Typography',
+                        prefix: 'Typography',
+                        content: style.name,
+                        color: { r: 0.6, g: 0.2, b: 0.8 }, // Purple
                         type: 'typography'
                     });
+                    typeFound = true;
                 }
+            } catch (e) { }
+        }
+
+        // Explicit fallback
+        if (!typeFound) {
+            const fontName = node.fontName;
+            const fontSize = node.fontSize;
+
+            if (fontName !== figma.mixed && fontSize !== figma.mixed) {
+                let lhStr = "Auto";
+                // @ts-ignore
+                if (node.lineHeight !== figma.mixed && node.lineHeight.unit !== 'AUTO') {
+                    // @ts-ignore
+                    lhStr = Math.round(node.lineHeight.value) + (node.lineHeight.unit === 'PERCENT' ? '%' : 'px');
+                }
+                localEntries.push({
+                    label: 'Typography',
+                    prefix: 'Typography',
+                    content: `${fontName.family} ${fontName.style} ${fontSize}px/${lhStr}`,
+                    color: { r: 0.6, g: 0.2, b: 0.8 },
+                    type: 'typography'
+                });
             }
         }
     }
@@ -473,21 +502,95 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
         }
     }
 
-    // 4. CORNER RADIUS
-    if ('cornerRadius' in node) {
-        if (node.cornerRadius !== figma.mixed && typeof node.cornerRadius === 'number' && node.cornerRadius > 0) {
+    // 4. EFFECTS (Shadows, etc.)
+    if (options.annotateEffects && 'effects' in node && (node.effects as Effect[]).length > 0) {
+        for (const effect of node.effects) {
+            if (effect.visible && effect.type === 'DROP_SHADOW') {
+                // Style check? Using explicit for now as Styles for effects are less common/variable
+                // Ideally check effectStyleId
+                let effectName = "";
+                if (node.effectStyleId && typeof node.effectStyleId === 'string') {
+                    try {
+                        const style = figma.getStyleById(node.effectStyleId);
+                        if (style) effectName = style.name;
+                    } catch (e) { }
+                }
+
+                if (effectName) {
+                    localEntries.push({
+                        label: 'Drop Shadow',
+                        prefix: 'Shadow',
+                        content: effectName,
+                        color: { r: 0.2, g: 0.8, b: 0.6 }, // Teal
+                        type: 'effect'
+                    });
+                } else {
+                    const color = effect.color;
+                    const r = Math.round(color.r * 255);
+                    const g = Math.round(color.g * 255);
+                    const b = Math.round(color.b * 255);
+                    const a = Math.round(color.a * 100) / 100;
+                    const val = `X:${effect.offset.x} Y:${effect.offset.y} B:${effect.radius} S:${effect.spread || 0} rgba(${r},${g},${b},${a})`;
+                    localEntries.push({
+                        label: 'Drop Shadow',
+                        prefix: 'Shadow',
+                        content: val,
+                        color: { r: 0.2, g: 0.8, b: 0.6 },
+                        type: 'effect'
+                    });
+                }
+            }
+        }
+    }
+
+    // 5. RADIUS
+    if (options.annotateRadius && 'cornerRadius' in node) {
+        let radiusDisplay = "";
+
+        // Check Variables for Radius
+        // @ts-ignore
+        const boundVariables = node.boundVariables;
+        if (boundVariables) {
+            // Check specific corners first or overall?
+            // "topRightRadius", "topLeftRadius", "bottomRightRadius", "bottomLeftRadius"
+            // or "cornerRadius" (if mixed, might not be there)
+            // @ts-ignore
+            if (boundVariables['cornerRadius']) {
+                try {
+                    // @ts-ignore
+                    const v = await figma.variables.getVariableByIdAsync(boundVariables['cornerRadius'].id);
+                    if (v) radiusDisplay = v.name;
+                } catch (e) { }
+            }
+        }
+
+        if (!radiusDisplay) {
+            // @ts-ignore
+            const cr = 'cornerRadius' in node ? node.cornerRadius : 0;
+            if (cr !== figma.mixed && cr !== undefined) {
+                if ((cr as number) > 0) {
+                    radiusDisplay = cr.toString();
+                }
+            } else if (cr === figma.mixed) {
+                radiusDisplay = "Mixed";
+            }
+        }
+
+        if (radiusDisplay) {
             localEntries.push({
                 label: 'Corner Radius',
                 prefix: 'Radius',
-                content: `${node.cornerRadius}`,
-                color: { r: 0.2, g: 0.8, b: 0.4 }, // Greenish
+                content: radiusDisplay,
+                color: { r: 0.0, g: 0.8, b: 0.5 }, // Greenish
                 type: 'radius'
             });
         }
     }
 
-    // 5. AUTO LAYOUT PADDING & SPACING
-    if ('layoutMode' in node && node.layoutMode !== 'NONE') {
+
+    // 6. LAYOUT (Padding) - Gap Removed per request
+    if (options.annotateLayout && 'layoutMode' in node && node.layoutMode !== "NONE") {
+        let paddingText = "";
         const paddingLeft = node.paddingLeft || 0;
         const paddingRight = node.paddingRight || 0;
         const paddingTop = node.paddingTop || 0;
@@ -496,15 +599,13 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
 
         // Simplify display: 
         // If all padding equal: "P: 16"
-        // If horiz/vert equal: "PH: 16 PV: 8"
-        // Else: "P: 10 20 10 20" (CSS order)
-
-        let paddingText = "";
-        if (paddingLeft === paddingRight && paddingTop === paddingBottom && paddingLeft === paddingTop) {
-            if (paddingLeft > 0) paddingText = `P:${paddingLeft}`;
-        } else if (paddingLeft === paddingRight && paddingTop === paddingBottom) {
+        // If symmetric: "PH: 16 PV: 8"
+        // Else: "P: T R B L"
+        if (paddingLeft === paddingRight && paddingTop === paddingBottom && paddingLeft === paddingTop && paddingLeft > 0) {
+            paddingText = `P:${paddingLeft}`;
+        } else if (paddingLeft === paddingRight && paddingTop === paddingBottom && (paddingLeft > 0 || paddingTop > 0)) {
             paddingText = `PH:${paddingLeft} PV:${paddingTop}`;
-        } else {
+        } else if (paddingLeft > 0 || paddingRight > 0 || paddingTop > 0 || paddingBottom > 0) {
             paddingText = `P:${paddingTop} ${paddingRight} ${paddingBottom} ${paddingLeft}`;
         }
 
@@ -519,45 +620,102 @@ async function collectAnnotations(node: SceneNode, options: AnnotationOptions, c
         }
     }
 
-    // 5. EFFECTS (Drop Shadow)
-    if ('effects' in node && (node.effects as any[]).length > 0) {
-        for (const effect of node.effects) {
-            if (effect.type === 'DROP_SHADOW' && effect.visible) {
-                // Extract color (with alpha)
-                const r = Math.round(effect.color.r * 255);
-                const g = Math.round(effect.color.g * 255);
-                const b = Math.round(effect.color.b * 255);
-                const a = effect.color.a !== undefined ? effect.color.a.toFixed(2) : '1.00';
-                const colorStr = `rgba(${r},${g},${b},${a})`;
 
-                // Spread radius (if available)
-                const spread = effect.spread !== undefined ? effect.spread : 0;
+    return localEntries;
+}
 
-                localEntries.push({
-                    label: 'Drop Shadow',
-                    prefix: 'Shadow',
-                    content: `X=${effect.offset.x} Y=${effect.offset.y} B=${effect.radius} S=${spread} ${colorStr}`,
-                    color: { r: 0.6, g: 0.4, b: 0.8 }, // Purple-ish
-                    type: 'effect'
+// Recursive traversal to Collect Data
+async function collectAnnotations(node: SceneNode, options: AnnotationOptions, collected: AnnotationData[], ignoredIds: Set<string>) {
+    if (ignoredIds.has(node.id)) return;
+    if ('visible' in node && !node.visible) return; // IGNORE HIDDEN ELEMENTS
+
+    // --- GROUPING LOGIC ---
+    // Check if this node is a candidate for grouping (e.g. Frame with Text child)
+    let mergedEntries: AnnotationEntry[] = [];
+    const childIdsToIgnore: string[] = [];
+
+    // Criteria: It's a Frame/Group/Component, has children, and at least one relevant child (like Text)
+    // And is not a top-level page or something huge.
+    // Simple heuristic: Frame with 1-3 children?
+    // User Example: Button (Frame) -> Text (Child).
+
+    // We only merge if it "looks" like a component.
+    // If it has a fill or stroke, it's a visual container.
+    const isContainer = (node.type === 'FRAME' || node.type === 'INSTANCE' || node.type === 'COMPONENT') &&
+        ((node.fills as Paint[]).length > 0 || (node.strokes as Paint[]).length > 0);
+
+    if (isContainer && 'children' in node && node.children.length > 0 && node.children.length <= 3) {
+        // Look for interesting children to merge
+        // Merging Strategy:
+        // 1. Get Parent Props
+        // 2. Get Child Props
+        // 3. Flatten into one list with Section Headers
+
+        const parentProps = await getProperties(node, options);
+
+        // Find relevant children (Text, or Vectors?)
+        const childrenToMerge: SceneNode[] = [];
+        for (const child of node.children) {
+            if (child.type === 'TEXT' && child.visible) {
+                childrenToMerge.push(child);
+            }
+            // Maybe Vector icons?
+            // if (child.type === 'VECTOR') ...
+        }
+
+        if (childrenToMerge.length > 0) {
+            // Merging!
+            if (parentProps.length > 0) {
+                mergedEntries.push({
+                    label: 'Section',
+                    prefix: node.name, // "Button"
+                    content: '',
+                    color: { r: 0, g: 0, b: 0 }, // Unused for header
+                    type: 'section_header'
                 });
+                mergedEntries.push(...parentProps);
+            }
+
+            for (const child of childrenToMerge) {
+                const childProps = await getProperties(child, options);
+                if (childProps.length > 0) {
+                    mergedEntries.push({
+                        label: 'Section',
+                        prefix: child.name, // "Login", "Text"
+                        content: '',
+                        color: { r: 0, g: 0, b: 0 },
+                        type: 'section_header'
+                    });
+                    mergedEntries.push(...childProps);
+                    childIdsToIgnore.push(child.id);
+                }
             }
         }
     }
 
-    // 4. GROUP CHILD TEXT NODES - REMOVED per user request for separate tags
-    // Child text nodes will be processed recursively as independent nodes.
+    // If we merged, use mergedEntries. If not, fallback to standard single node processing.
+    if (mergedEntries.length > 0) {
+        // @ts-ignore
+        const mergedChildren = 'children' in node ? node.children.filter((c: SceneNode) => childIdsToIgnore.includes(c.id)) : [];
+        collected.push({ nodes: [node, ...mergedChildren], entries: mergedEntries });
 
-    if (localEntries.length > 0) {
-        collected.push({
-            nodes: involvedNodes, // Include parent and any collected text children
-            entries: localEntries
-        });
+        // Mark children as ignored so we don't process them again in recursion
+        for (const id of childIdsToIgnore) ignoredIds.add(id);
+    }
+    else {
+        // Standard Processing
+        const localEntries = await getProperties(node, options);
+        if (localEntries.length > 0) {
+            collected.push({ nodes: [node], entries: localEntries });
+        }
     }
 
-    // Recurse
+    // Traverse Children (skipping ignored ones)
     if ('children' in node) {
         for (const child of node.children) {
-            await collectAnnotations(child, options, collected, ignoredIds);
+            if (!ignoredIds.has(child.id)) {
+                await collectAnnotations(child, options, collected, ignoredIds);
+            }
         }
     }
 }
@@ -662,8 +820,9 @@ figma.ui.onmessage = async (msg) => {
 
                     const min = Math.min(distLeft, distRight, distTop, distBottom);
 
-                    if (min === distTop) top.push(data);
-                    else if (min === distBottom) bottom.push(data);
+                    // Prefer Bottom/Sides over Top if equidistant
+                    if (min === distBottom) bottom.push(data);
+                    else if (min === distTop) top.push(data);
                     else if (min === distLeft) left.push(data);
                     else right.push(data);
                 }
