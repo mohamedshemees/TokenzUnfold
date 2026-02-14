@@ -259,24 +259,47 @@ export async function getProperties(node: SceneNode, options: AnnotationOptions)
     }
 
     // 5. RADIUS
-    if (options.annotateRadius && 'cornerRadius' in node) {
+    if (options.annotateRadius) {
         let radiusDisplay = "";
-        // @ts-ignore
-        const boundVariables = node.boundVariables as any;
-        if (boundVariables && boundVariables.cornerRadius) {
-            try {
-                const v = await figma.variables.getVariableByIdAsync(boundVariables.cornerRadius.id);
-                if (v) radiusDisplay = v.name;
-            } catch (e) { }
+        const nodeAsAny = node as any;
+
+        // A. Check Variables (Aggregate or Individual Corners)
+        if (nodeAsAny.boundVariables) {
+            const bv = nodeAsAny.boundVariables;
+            if (bv.cornerRadius) {
+                try {
+                    const v = await figma.variables.getVariableByIdAsync(bv.cornerRadius.id);
+                    if (v) radiusDisplay = v.name;
+                } catch (e) { }
+            } else {
+                const cornerProps = ['topLeftRadius', 'topRightRadius', 'bottomLeftRadius', 'bottomRightRadius'];
+                const varNames: string[] = [];
+                for (const p of cornerProps) {
+                    if (bv[p]) {
+                        try {
+                            const v = await figma.variables.getVariableByIdAsync(bv[p].id);
+                            if (v) varNames.push(v.name);
+                        } catch (e) { }
+                    }
+                }
+                if (varNames.length > 0) {
+                    const uniqueNames = Array.from(new Set(varNames));
+                    radiusDisplay = uniqueNames.join(", ");
+                }
+            }
         }
 
-        if (!radiusDisplay) {
-            // @ts-ignore
-            const cr = node.cornerRadius;
+        // B. Fallback to Explicit Values
+        if (!radiusDisplay && 'cornerRadius' in node) {
+            const cr = nodeAsAny.cornerRadius;
             if (cr !== figma.mixed && cr !== undefined) {
-                if ((cr as number) > 0) radiusDisplay = cr.toString();
+                if (cr > 0) radiusDisplay = cr.toString();
             } else if (cr === figma.mixed) {
-                radiusDisplay = "Mixed";
+                const tl = nodeAsAny.topLeftRadius || 0;
+                const tr = nodeAsAny.topRightRadius || 0;
+                const bl = nodeAsAny.bottomLeftRadius || 0;
+                const br = nodeAsAny.bottomRightRadius || 0;
+                radiusDisplay = `${tl}/${tr}/${br}/${bl}`;
             }
         }
 
