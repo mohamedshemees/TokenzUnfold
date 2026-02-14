@@ -41,7 +41,7 @@ export async function getProperties(node: SceneNode, options: AnnotationOptions)
 
             if (!fillFound && 'fillStyleId' in node && node.fillStyleId && typeof node.fillStyleId === 'string') {
                 try {
-                    const style = figma.getStyleById(node.fillStyleId);
+                    const style = await figma.getStyleByIdAsync(node.fillStyleId);
                     if (style) {
                         localEntries.push({
                             label: node.type === 'TEXT' ? 'Text Color' : 'Fill',
@@ -104,7 +104,7 @@ export async function getProperties(node: SceneNode, options: AnnotationOptions)
 
             if (!strokeFound && 'strokeStyleId' in node && node.strokeStyleId && typeof node.strokeStyleId === 'string') {
                 try {
-                    const style = figma.getStyleById(node.strokeStyleId);
+                    const style = await figma.getStyleByIdAsync(node.strokeStyleId);
                     if (style) {
                         localEntries.push({
                             label: 'Stroke Color',
@@ -147,7 +147,7 @@ export async function getProperties(node: SceneNode, options: AnnotationOptions)
 
         if (node.textStyleId && typeof node.textStyleId === 'string') {
             try {
-                const style = figma.getStyleById(node.textStyleId);
+                const style = await figma.getStyleByIdAsync(node.textStyleId);
                 if (style) {
                     localEntries.push({
                         label: 'Typography',
@@ -224,12 +224,10 @@ export async function getProperties(node: SceneNode, options: AnnotationOptions)
         for (const effect of node.effects) {
             if (effect.visible && effect.type === 'DROP_SHADOW') {
                 let effectName = "";
-                if (node.effectStyleId && typeof node.effectStyleId === 'string') {
-                    try {
-                        const style = figma.getStyleById(node.effectStyleId);
-                        if (style) effectName = style.name;
-                    } catch (e) { }
-                }
+                try {
+                    const style = await figma.getStyleByIdAsync(node.effectStyleId);
+                    if (style) effectName = style.name;
+                } catch (e) { }
 
                 if (effectName) {
                     localEntries.push({

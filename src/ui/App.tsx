@@ -97,7 +97,7 @@ const App = () => {
         padding: '16px',
         display: 'flex',
         flexDirection: 'column' as const,
-        gap: '16px',
+        gap: '20px',
         fontFamily: "'Inter', sans-serif",
         color: currentTheme.textPrimary,
         height: '100%',
@@ -148,28 +148,6 @@ const App = () => {
 
     return (
         <div style={containerStyle}>
-            {/* Header with Icon */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <div style={{
-                    width: '32px',
-                    height: '32px',
-                    borderRadius: '8px',
-                    backgroundColor: options.theme === 'blueprint' ? '#00FFFF' : '#18A0FB', // Accent color tweak?
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: options.theme === 'blueprint' ? '#000' : 'white'
-                }}>
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M12 19l7-7 3 3-7 7-3-3z"></path>
-                        <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path>
-                        <path d="M2 2l7.586 7.586"></path>
-                        <circle cx="11" cy="11" r="2"></circle>
-                    </svg>
-                </div>
-                <h2 style={{ margin: 0, fontSize: '16px', fontWeight: 600, color: currentTheme.headerText }}>Design Annotator</h2>
-            </div>
-
             {/* Options Card */}
             <div style={cardStyle}>
                 <div style={sectionTitleStyle}>ANNOTATION OPTIONS</div>

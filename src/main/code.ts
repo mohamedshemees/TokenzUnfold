@@ -67,7 +67,7 @@ figma.ui.onmessage = async (msg) => {
                 // --- CLEANUP OLD ANNOTATIONS ---
                 const existingTagId = rootNode.getPluginData('annotationTagId');
                 if (existingTagId) {
-                    const oldTag = figma.getNodeById(existingTagId);
+                    const oldTag = await figma.getNodeByIdAsync(existingTagId);
                     if (oldTag) {
                         try {
                             const oldHash = oldTag.getPluginData('annotationHash');
