@@ -101,6 +101,7 @@ const App = () => {
         fontFamily: "'Inter', sans-serif",
         color: currentTheme.textPrimary,
         height: '100%',
+        overflowY: 'auto' as const, // Fix for hidden buttons
         boxSizing: 'border-box' as const,
         backgroundColor: currentTheme.containerFill, // Reactive BG
         transition: 'background-color 0.3s, color 0.3s'
