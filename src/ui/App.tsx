@@ -61,6 +61,9 @@ const App = () => {
         annotateColors: true,
         annotateTypography: true,
         annotateStates: true,
+        annotateRadius: true,
+        annotateEffects: true,
+        annotateLayout: false,
         theme: 'dark', // Default theme
     });
 
@@ -200,6 +203,39 @@ const App = () => {
                         style={{ width: '16px', height: '16px', accentColor: '#18A0FB' }}
                     />
                     <span>Annotate Component States</span>
+                </label>
+                <div style={{ height: '1px', backgroundColor: currentTheme.containerStroke }}></div>
+                <label style={checkboxLabelStyle}>
+                    <input
+                        type="checkbox"
+                        name="annotateRadius"
+                        checked={options.annotateRadius}
+                        onChange={handleCheckboxChange}
+                        style={{ width: '16px', height: '16px', accentColor: '#18A0FB' }}
+                    />
+                    <span>Annotate Corner Radius</span>
+                </label>
+                <div style={{ height: '1px', backgroundColor: currentTheme.containerStroke }}></div>
+                <label style={checkboxLabelStyle}>
+                    <input
+                        type="checkbox"
+                        name="annotateEffects"
+                        checked={options.annotateEffects}
+                        onChange={handleCheckboxChange}
+                        style={{ width: '16px', height: '16px', accentColor: '#18A0FB' }}
+                    />
+                    <span>Annotate Effects <span style={{ color: currentTheme.textSecondary }}>(Shadows)</span></span>
+                </label>
+                <div style={{ height: '1px', backgroundColor: currentTheme.containerStroke }}></div>
+                <label style={checkboxLabelStyle}>
+                    <input
+                        type="checkbox"
+                        name="annotateLayout"
+                        checked={options.annotateLayout}
+                        onChange={handleCheckboxChange}
+                        style={{ width: '16px', height: '16px', accentColor: '#18A0FB' }}
+                    />
+                    <span>Annotate Layout Spacing</span>
                 </label>
             </div>
 
