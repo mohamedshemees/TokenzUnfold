@@ -1,10 +1,24 @@
 {
     "name": "TokenzUnfold",
-    "id": "1234567890",
+    "id": "1604528003423822682",
     "api": "1.0.0",
     "main": "dist/code.js",
     "ui": "dist/index.html",
     "editorType": [
         "figma"
+    ],
+    "capabilities": [],
+    "networkAccess": {
+        "allowedDomains": [
+            "none"
+        ],
+        "reasoning": "The plugin processes all design data locally within the figma environment and does not transmit any data to external servers."
+    },
+    "documentAccess": "dynamic-page",
+    "menu": [
+        {
+            "name": "Run TokenzUnfold",
+            "command": "run"
+        }
     ]
 }
