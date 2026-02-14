@@ -32,6 +32,11 @@ An intelligent Figma plugin that automatically generates design annotations for 
 -   **Styling**: Vanilla CSS.
 
 ---
+## Demo
+
+
+https://github.com/user-attachments/assets/f01f6483-f988-445a-9916-ad2c1f649937
+
 
 ## 🚀 Getting Started
 
