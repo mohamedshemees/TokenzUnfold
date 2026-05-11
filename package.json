@@ -23,6 +23,8 @@
     "vite-plugin-singlefile": "^2.0.0"
   },
   "dependencies": {
+    "@types/jszip": "^3.4.0",
+    "jszip": "^3.10.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   }
