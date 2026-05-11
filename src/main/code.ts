@@ -13,7 +13,7 @@ import { sortAnnotations } from "./layout";
 import { drawSmartConnector } from "./connectors";
 
 // This shows the HTML page in "ui.html".
-figma.showUI(__html__, { width: 340, height: 500 });
+figma.showUI(__html__, { width: 450, height: 550 });
 
 figma.ui.onmessage = async (msg) => {
     try {
@@ -360,6 +360,10 @@ figma.ui.onmessage = async (msg) => {
 
         if (msg.type === 'cancel') figma.closePlugin();
 
+        if (msg.type === 'resize') {
+            figma.ui.resize(msg.width, msg.height);
+        }
+
         if (msg.type === 'update-theme') {
             const themeName = msg.theme;
             const theme = THEMES[themeName] || THEMES['dark'];
@@ -391,6 +395,105 @@ figma.ui.onmessage = async (msg) => {
                     }
                 }
             }
+        }
+
+        if (msg.type === 'notify') {
+            figma.notify(msg.message);
+        }
+
+        if (msg.type === 'get-selection-for-export') {
+            const selection = figma.currentPage.selection;
+            if (selection.length === 0) {
+                figma.ui.postMessage({ type: 'selection-for-export', selection: [] });
+                return;
+            }
+            const selData = await Promise.all(selection.map(async node => {
+                let preview = null;
+                try {
+                    const maxDim = Math.max(node.width, node.height);
+                    const scale = maxDim > 0 ? Math.min(1, 64 / maxDim) : 1;
+                    preview = await node.exportAsync({ format: 'PNG', constraint: { type: 'SCALE', value: scale } });
+                } catch (e) {
+                    console.error("Failed to generate preview for", node.name, e);
+                }
+                return {
+                    id: node.id,
+                    name: node.name,
+                    preview
+                };
+            }));
+            figma.ui.postMessage({ type: 'selection-for-export', selection: selData });
+        }
+
+        if (msg.type === 'execute-export') {
+            const items = msg.items;
+            if (!items || items.length === 0) {
+                figma.ui.postMessage({ type: 'export-error' });
+                return;
+            }
+
+            const images = [];
+
+            for (const item of items) {
+                const node = await figma.getNodeByIdAsync(item.id) as SceneNode;
+                if (!node) continue;
+
+                // Ensure name is snake_case and non-empty
+                let rawName = item.name || node.name;
+                let nodeName = rawName.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+                if (!nodeName) nodeName = 'image';
+
+                if (item.format === 'SVG') {
+                    try {
+                        const bytes = await node.exportAsync({ format: 'SVG' });
+                        images.push({
+                            name: nodeName,
+                            data: bytes,
+                            width: Math.round(node.width),
+                            height: Math.round(node.height),
+                            density: 'any',
+                            format: 'svg'
+                        });
+                    } catch (err) {
+                        console.error(`Export failed for ${node.name} as SVG`, err);
+                        figma.notify(`Failed to export ${node.name} as SVG`);
+                    }
+                } else {
+                    const allDensities = [
+                        { name: 'mdpi', scale: 1 },
+                        { name: 'hdpi', scale: 1.5 },
+                        { name: 'xhdpi', scale: 2 },
+                        { name: 'xxhdpi', scale: 3 },
+                        { name: 'xxxhdpi', scale: 4 }
+                    ];
+
+                    const itemDensities = item.densities || { mdpi: true, hdpi: true, xhdpi: true, xxhdpi: true, xxxhdpi: true };
+                    const densities = allDensities.filter(d => itemDensities[d.name]);
+                    const exportFormat = item.format === 'JPG' ? 'JPG' : 'PNG';
+
+                    for (const density of densities) {
+                        try {
+                            const bytes = await node.exportAsync({
+                                format: exportFormat,
+                                constraint: { type: 'SCALE', value: density.scale }
+                            });
+                            images.push({
+                                name: nodeName,
+                                data: bytes,
+                                width: Math.round(node.width),
+                                height: Math.round(node.height),
+                                density: density.name,
+                                format: exportFormat.toLowerCase()
+                            });
+                        } catch (err) {
+                            console.error(`Export failed for ${node.name} at ${density.name}`, err);
+                            figma.notify(`Failed to export ${node.name} at ${density.name}`);
+                        }
+                    }
+                }
+            }
+
+            figma.ui.postMessage({ type: 'export-success', images });
         }
     } catch (error) {
         console.error("Plugin Error:", error);
