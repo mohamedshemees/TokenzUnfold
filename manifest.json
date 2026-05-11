@@ -8,12 +8,12 @@
         "figma"
     ],
     "capabilities": [],
-    "networkAccess": {
-        "allowedDomains": [
-            "none"
-        ],
-        "reasoning": "The plugin processes all design data locally within the figma environment and does not transmit any data to external servers."
-    },
+"networkAccess": {
+    "allowedDomains": [
+        "http://localhost:6789"
+    ],
+    "reasoning": "Communicates only with the local Android Studio plugin on the user's own machine. No external network access."
+},
     "documentAccess": "dynamic-page",
     "menu": [
         {
