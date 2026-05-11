@@ -66,6 +66,65 @@ const App = () => {
         annotateLayout: false,
         theme: 'dark', // Default theme
     });
+    const [isExporting, setIsExporting] = useState(false);
+    const [exportDialogVisible, setExportDialogVisible] = useState(false);
+    const [exportSelection, setExportSelection] = useState<any[]>([]);
+    const [exportTarget, setExportTarget] = useState<'android_studio' | 'local'>('android_studio');
+    const [exportPort, setExportPort] = useState('6789');
+    const [globalExportFormat, setGlobalExportFormat] = useState('PNG');
+    const exportTargetRef = React.useRef(exportTarget);
+    const exportPortRef = React.useRef(exportPort);
+    const globalExportFormatRef = React.useRef(globalExportFormat);
+    const resizeHandleRef = React.useRef<HTMLDivElement>(null);
+
+    const handleResizePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+        if (resizeHandleRef.current) {
+            resizeHandleRef.current.setPointerCapture(e.pointerId);
+        }
+        (window as any).isResizing = true;
+        e.preventDefault();
+    };
+
+    React.useEffect(() => {
+        const handlePointerMove = (e: PointerEvent) => {
+            if ((window as any).isResizing) {
+                const newWidth = Math.max(300, e.clientX);
+                const newHeight = Math.max(400, e.clientY);
+                parent.postMessage({ pluginMessage: { type: 'resize', width: newWidth, height: newHeight } }, '*');
+            }
+        };
+
+        const handlePointerUp = (e: PointerEvent) => {
+            if ((window as any).isResizing) {
+                (window as any).isResizing = false;
+                if (resizeHandleRef.current) {
+                    try {
+                        resizeHandleRef.current.releasePointerCapture(e.pointerId);
+                    } catch (err) {}
+                }
+            }
+        };
+
+        window.addEventListener('pointermove', handlePointerMove);
+        window.addEventListener('pointerup', handlePointerUp);
+        
+        return () => {
+            window.removeEventListener('pointermove', handlePointerMove);
+            window.removeEventListener('pointerup', handlePointerUp);
+        };
+    }, []);
+
+    React.useEffect(() => {
+        exportTargetRef.current = exportTarget;
+    }, [exportTarget]);
+
+    React.useEffect(() => {
+        exportPortRef.current = exportPort;
+    }, [exportPort]);
+
+    React.useEffect(() => {
+        globalExportFormatRef.current = globalExportFormat;
+    }, [globalExportFormat]);
 
     const onAnnotate = () => {
         parent.postMessage({ pluginMessage: { type: 'annotate-selection', options } }, '*');
@@ -89,6 +148,140 @@ const App = () => {
     React.useEffect(() => {
         parent.postMessage({ pluginMessage: { type: 'update-theme', theme: options.theme } }, '*');
     }, [options.theme]);
+
+    React.useEffect(() => {
+        const handleMessage = (event: MessageEvent) => {
+            const pluginMessage = event.data.pluginMessage;
+            if (!pluginMessage) return;
+
+            const { type, images, selection } = pluginMessage;
+
+            if (type === 'selection-for-export') {
+                if (!selection || selection.length === 0) {
+                     parent.postMessage({ pluginMessage: { type: 'notify', message: 'Please select at least one element' } }, '*');
+                     return;
+                }
+                
+                // Cleanup old preview URLs
+                setExportSelection(prev => {
+                    prev.forEach(item => {
+                        if (item.previewUrl) window.URL.revokeObjectURL(item.previewUrl);
+                    });
+                    return prev;
+                });
+
+                const newSelection = selection.map((s: any) => {
+                    let previewUrl = null;
+                    if (s.preview) {
+                        const blob = new Blob([s.preview], { type: 'image/png' });
+                        previewUrl = window.URL.createObjectURL(blob);
+                    }
+                    return { 
+                        ...s, 
+                        selected: true, 
+                        format: globalExportFormatRef.current, 
+                        previewUrl,
+                        densities: {
+                            mdpi: true,
+                            hdpi: true,
+                            xhdpi: true,
+                            xxhdpi: true,
+                            xxxhdpi: true
+                        }
+                    };
+                });
+                setExportSelection(newSelection);
+                setExportDialogVisible(true);
+            } else if (type === 'export-error') {
+                setIsExporting(false);
+            } else if (type === 'export-success') {
+                const arrayBufferToBase64 = (buffer: Uint8Array) => {
+                    let binary = '';
+                    const bytes = new Uint8Array(buffer);
+                    const len = bytes.byteLength;
+                    for (let i = 0; i < len; i++) {
+                        binary += String.fromCharCode(bytes[i]);
+                    }
+                    return window.btoa(binary);
+                };
+
+                const payload = {
+                    images: images.map((img: any) => ({
+                        name: img.name,
+                        data: arrayBufferToBase64(img.data),
+                        width: img.width,
+                        height: img.height,
+                        density: img.density,
+                        format: img.format
+                    }))
+                };
+
+                if (exportTargetRef.current === 'android_studio') {
+                    const port = exportPortRef.current || '6789';
+                    fetch(`http://localhost:${port}/import`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    }).then(res => {
+                        setIsExporting(false);
+                        setExportDialogVisible(false);
+                        if (res.ok) {
+                            parent.postMessage({ pluginMessage: { type: 'notify', message: 'Successfully exported to Android Studio!' } }, '*');
+                        } else {
+                            parent.postMessage({ pluginMessage: { type: 'notify', message: 'Failed to export to Android Studio.' } }, '*');
+                        }
+                    }).catch(err => {
+                        setIsExporting(false);
+                        parent.postMessage({ pluginMessage: { type: 'notify', message: 'Android Studio plugin is not running, please open your project first' } }, '*');
+                    });
+                } else if (exportTargetRef.current === 'local') {
+                    import('jszip').then((JSZip) => {
+                        const zip = new JSZip.default();
+                        images.forEach((img: any) => {
+                            let folder = '';
+                            if (img.format === 'svg') {
+                                folder = 'drawable';
+                            } else {
+                                const densityFolderMap: Record<string, string> = {
+                                    mdpi: 'drawable-mdpi',
+                                    hdpi: 'drawable-hdpi',
+                                    xhdpi: 'drawable-xhdpi',
+                                    xxhdpi: 'drawable-xxhdpi',
+                                    xxxhdpi: 'drawable-xxxhdpi'
+                                };
+                                folder = densityFolderMap[img.density] || 'drawable';
+                            }
+                            const extension = img.format;
+                            const filename = `${folder}/${img.name}.${extension}`;
+                            zip.file(filename, img.data, { binary: true });
+                        });
+                        
+                        zip.generateAsync({ type: 'blob' }).then(content => {
+                            const url = window.URL.createObjectURL(content);
+                            const a = document.createElement('a');
+                            a.style.display = 'none';
+                            a.href = url;
+                            a.download = 'android_assets.zip';
+                            document.body.appendChild(a);
+                            a.click();
+                            window.URL.revokeObjectURL(url);
+                            document.body.removeChild(a);
+                            
+                            setIsExporting(false);
+                            setExportDialogVisible(false);
+                            parent.postMessage({ pluginMessage: { type: 'notify', message: 'Downloaded assets zip successfully.' } }, '*');
+                        });
+                    }).catch(err => {
+                        console.error('Failed to load JSZip', err);
+                        setIsExporting(false);
+                        parent.postMessage({ pluginMessage: { type: 'notify', message: 'Failed to create zip file.' } }, '*');
+                    });
+                }
+            }
+        };
+        window.addEventListener('message', handleMessage);
+        return () => window.removeEventListener('message', handleMessage);
+    }, []);
 
     const currentTheme = THEMES[options.theme] || THEMES['dark'];
 
@@ -145,6 +338,223 @@ const App = () => {
         color: currentTheme.textPrimary,
         cursor: 'pointer'
     };
+
+    const renderDragHandle = () => (
+        <div
+            ref={resizeHandleRef}
+            onPointerDown={handleResizePointerDown}
+            style={{
+                position: 'fixed',
+                right: 0,
+                bottom: 0,
+                width: '16px',
+                height: '16px',
+                cursor: 'nwse-resize',
+                zIndex: 1000,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                opacity: 0.7
+            }}
+        >
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <line x1="12" y1="0" x2="0" y2="12" stroke={currentTheme.textSecondary} strokeWidth="1" strokeLinecap="round"/>
+                <line x1="12" y1="4" x2="4" y2="12" stroke={currentTheme.textSecondary} strokeWidth="1" strokeLinecap="round"/>
+                <line x1="12" y1="8" x2="8" y2="12" stroke={currentTheme.textSecondary} strokeWidth="1" strokeLinecap="round"/>
+            </svg>
+        </div>
+    );
+
+    const onConfirmExport = () => {
+        const itemsToExport = exportSelection.filter(s => s.selected).map(s => ({ id: s.id, name: s.name, format: s.format, densities: s.densities }));
+        if (itemsToExport.length === 0) return;
+        
+        setIsExporting(true);
+        parent.postMessage({ pluginMessage: { type: 'execute-export', items: itemsToExport } }, '*');
+    };
+
+    if (exportDialogVisible) {
+        return (
+            <div style={containerStyle}>
+                <div style={cardStyle}>
+                    <div style={sectionTitleStyle}>GLOBAL IMAGE FORMAT</div>
+                    <div style={{ marginBottom: '16px' }}>
+                        <select 
+                            value={globalExportFormat}
+                            onChange={(e) => {
+                                const newFormat = e.target.value;
+                                setGlobalExportFormat(newFormat);
+                                setExportSelection(prev => prev.map(item => ({ ...item, format: newFormat })));
+                            }}
+                            style={{ ...inputStyle, width: '100%', fontSize: '13px' }}
+                        >
+                            <option value="PNG">PNG</option>
+                            <option value="JPG">JPG</option>
+                            <option value="SVG">SVG</option>
+                        </select>
+                    </div>
+
+                    <div style={sectionTitleStyle}>EXPORT TARGET</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                            <label style={checkboxLabelStyle}>
+                                <input 
+                                    type="radio" 
+                                    name="exportTarget"
+                                    value="android_studio"
+                                    checked={exportTarget === 'android_studio'} 
+                                    onChange={() => setExportTarget('android_studio')}
+                                    style={{ accentColor: '#3DDC84', cursor: 'pointer', width: '14px', height: '14px' }}
+                                />
+                                <span style={{ fontSize: '12px', color: currentTheme.textPrimary }}>Android Studio Plugin (Sync)</span>
+                            </label>
+                            
+                            {exportTarget === 'android_studio' && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', paddingLeft: '24px' }}>
+                                    <span style={{ fontSize: '11px', color: currentTheme.textSecondary }}>Port:</span>
+                                    <span style={{ 
+                                        padding: '2px 6px', 
+                                        backgroundColor: currentTheme.containerFill, 
+                                        border: `1px solid ${currentTheme.containerStroke}`, 
+                                        borderRadius: '4px', 
+                                        fontSize: '11px', 
+                                        color: currentTheme.textPrimary 
+                                    }}>
+                                        6789
+                                    </span>
+                                </div>
+                            )}
+                        </div>
+                        <label style={checkboxLabelStyle}>
+                            <input 
+                                type="radio" 
+                                name="exportTarget"
+                                value="local"
+                                checked={exportTarget === 'local'} 
+                                onChange={() => setExportTarget('local')}
+                                style={{ accentColor: '#3DDC84', cursor: 'pointer', width: '14px', height: '14px' }}
+                            />
+                            <span style={{ fontSize: '12px', color: currentTheme.textPrimary }}>Download as Zip</span>
+                        </label>
+                    </div>
+                    
+                    <div style={sectionTitleStyle}>SELECTED ELEMENTS</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '350px', overflowY: 'auto' }}>
+                        {exportSelection.map((item, index) => (
+                            <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px', backgroundColor: currentTheme.bodyFill, borderRadius: '4px', border: `1px solid ${currentTheme.containerStroke}` }}>
+                                <input 
+                                    type="checkbox" 
+                                    checked={item.selected} 
+                                    onChange={(e) => {
+                                        const newSel = [...exportSelection];
+                                        newSel[index].selected = e.target.checked;
+                                        setExportSelection(newSel);
+                                    }}
+                                    style={{ accentColor: '#3DDC84', width: '16px', height: '16px', cursor: 'pointer', flexShrink: 0 }}
+                                />
+                                {item.previewUrl ? (
+                                    <img src={item.previewUrl} alt="preview" style={{ width: '48px', height: '48px', objectFit: 'contain', borderRadius: '4px', backgroundColor: currentTheme.headerFill, flexShrink: 0 }} />
+                                ) : (
+                                    <div style={{ width: '48px', height: '48px', borderRadius: '4px', backgroundColor: currentTheme.headerFill, flexShrink: 0 }} />
+                                )}
+                                
+                                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '6px', minWidth: 0 }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <input 
+                                            type="text"
+                                            value={item.name}
+                                            onChange={(e) => {
+                                                const newSel = [...exportSelection];
+                                                newSel[index].name = e.target.value;
+                                                setExportSelection(newSel);
+                                            }}
+                                            style={{ 
+                                                ...inputStyle, 
+                                                padding: '4px', 
+                                                fontSize: '12px', 
+                                                fontWeight: 600, 
+                                                flex: 1, 
+                                                minWidth: 0, 
+                                                marginRight: '8px' 
+                                            }}
+                                        />
+                                        <select 
+                                            value={item.format}
+                                            onChange={(e) => {
+                                                const newSel = [...exportSelection];
+                                                newSel[index].format = e.target.value;
+                                                setExportSelection(newSel);
+                                            }}
+                                            style={{ ...inputStyle, padding: '2px 4px', fontSize: '11px', width: '60px' }}
+                                        >
+                                            <option value="PNG">PNG</option>
+                                            <option value="JPG">JPG</option>
+                                            <option value="SVG">SVG</option>
+                                        </select>
+                                    </div>
+                                    
+                                    {item.format !== 'SVG' && (
+                                        <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                                            {['mdpi', 'hdpi', 'xhdpi', 'xxhdpi', 'xxxhdpi'].map(scale => (
+                                                <label key={scale} style={{ display: 'flex', alignItems: 'center', gap: '2px', fontSize: '10px', color: currentTheme.textSecondary, cursor: 'pointer' }}>
+                                                    <input 
+                                                        type="checkbox"
+                                                        checked={item.densities[scale]}
+                                                        onChange={(e) => {
+                                                            const newSel = [...exportSelection];
+                                                            newSel[index].densities[scale] = e.target.checked;
+                                                            setExportSelection(newSel);
+                                                        }}
+                                                        style={{ width: '10px', height: '10px', accentColor: '#3DDC84', cursor: 'pointer' }}
+                                                    />
+                                                    {scale}
+                                                </label>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+                
+                <div style={{ display: 'flex', gap: '10px', marginTop: 'auto' }}>
+                    <button onClick={() => setExportDialogVisible(false)} style={{
+                        flex: 1,
+                        padding: '10px 16px',
+                        backgroundColor: currentTheme.bodyFill,
+                        color: currentTheme.textPrimary,
+                        border: `1px solid ${currentTheme.containerStroke}`,
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        fontWeight: 500,
+                        fontSize: '13px',
+                        transition: 'background-color 0.2s'
+                    }}>Back</button>
+                    <button 
+                        onClick={onConfirmExport}
+                        disabled={isExporting || !exportSelection.some(s => s.selected)}
+                        style={{
+                            flex: 1,
+                            padding: '10px 16px',
+                            backgroundColor: isExporting ? currentTheme.containerStroke : '#3DDC84',
+                            color: isExporting ? currentTheme.textSecondary : '#000000',
+                            border: 'none',
+                            borderRadius: '6px',
+                            cursor: isExporting ? 'not-allowed' : 'pointer',
+                            fontWeight: 600,
+                            fontSize: '13px',
+                            transition: 'background-color 0.2s',
+                            boxShadow: '0 1px 2px rgba(0,0,0, 0.2)'
+                        }}
+                    >
+                        {isExporting ? 'Exporting...' : 'Confirm Export'}
+                    </button>
+                </div>
+                {renderDragHandle()}
+            </div>
+        );
+    }
 
     return (
         <div style={containerStyle}>
@@ -276,32 +686,55 @@ const App = () => {
             </div>
 
             {/* Actions */}
-            <div style={{ display: 'flex', gap: '10px', marginTop: 'auto' }}>
-                <button onClick={onAnnotate} style={{
-                    flex: 1,
-                    padding: '10px 16px',
-                    backgroundColor: options.theme === 'blueprint' ? '#00FFFF' : '#18A0FB',
-                    color: options.theme === 'blueprint' ? '#000' : 'white',
-                    border: 'none',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    fontWeight: 600,
-                    fontSize: '13px',
-                    transition: 'background-color 0.2s',
-                    boxShadow: '0 1px 2px rgba(0,0,0, 0.2)'
-                }}>Annotate Selection</button>
-                <button onClick={onCancel} style={{
-                    padding: '10px 16px',
-                    backgroundColor: currentTheme.bodyFill,
-                    color: currentTheme.textPrimary,
-                    border: `1px solid ${currentTheme.containerStroke}`,
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    fontWeight: 500,
-                    fontSize: '13px',
-                    transition: 'background-color 0.2s'
-                }}>Close</button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: 'auto' }}>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                    <button onClick={onAnnotate} style={{
+                        flex: 1,
+                        padding: '10px 16px',
+                        backgroundColor: options.theme === 'blueprint' ? '#00FFFF' : '#18A0FB',
+                        color: options.theme === 'blueprint' ? '#000' : 'white',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        fontWeight: 600,
+                        fontSize: '13px',
+                        transition: 'background-color 0.2s',
+                        boxShadow: '0 1px 2px rgba(0,0,0, 0.2)'
+                    }}>Annotate Selection</button>
+                    <button onClick={onCancel} style={{
+                        padding: '10px 16px',
+                        backgroundColor: currentTheme.bodyFill,
+                        color: currentTheme.textPrimary,
+                        border: `1px solid ${currentTheme.containerStroke}`,
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        fontWeight: 500,
+                        fontSize: '13px',
+                        transition: 'background-color 0.2s'
+                    }}>Close</button>
+                </div>
+                <button 
+                    onClick={() => {
+                        parent.postMessage({ pluginMessage: { type: 'get-selection-for-export' } }, '*');
+                    }} 
+                    disabled={isExporting}
+                    style={{
+                        padding: '10px 16px',
+                        backgroundColor: isExporting ? currentTheme.containerStroke : '#3DDC84', // Android Green
+                        color: isExporting ? currentTheme.textSecondary : '#000000',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: isExporting ? 'not-allowed' : 'pointer',
+                        fontWeight: 600,
+                        fontSize: '13px',
+                        transition: 'background-color 0.2s',
+                        boxShadow: '0 1px 2px rgba(0,0,0, 0.2)'
+                    }}
+                >
+                    {isExporting ? 'Exporting...' : 'Export'}
+                </button>
             </div>
+            {renderDragHandle()}
         </div>
     );
 };
