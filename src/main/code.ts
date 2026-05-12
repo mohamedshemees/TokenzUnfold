@@ -13,7 +13,7 @@ import { sortAnnotations } from "./layout";
 import { drawSmartConnector } from "./connectors";
 
 // This shows the HTML page in "ui.html".
-figma.showUI(__html__, { width: 450, height: 550 });
+figma.showUI(__html__, { width: 450, height: 700 });
 
 figma.ui.onmessage = async (msg) => {
     try {
@@ -361,7 +361,7 @@ figma.ui.onmessage = async (msg) => {
         if (msg.type === 'cancel') figma.closePlugin();
 
         if (msg.type === 'resize') {
-            figma.ui.resize(msg.width, msg.height);
+            figma.ui.resize(Math.round(msg.width), Math.round(msg.height));
         }
 
         if (msg.type === 'update-theme') {

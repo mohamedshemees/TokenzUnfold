@@ -88,8 +88,8 @@ const App = () => {
     React.useEffect(() => {
         const handlePointerMove = (e: PointerEvent) => {
             if ((window as any).isResizing) {
-                const newWidth = Math.max(300, e.clientX);
-                const newHeight = Math.max(400, e.clientY);
+                const newWidth = Math.round(Math.max(300, e.clientX));
+                const newHeight = Math.round(Math.max(500, e.clientY));
                 parent.postMessage({ pluginMessage: { type: 'resize', width: newWidth, height: newHeight } }, '*');
             }
         };
@@ -413,11 +413,8 @@ const App = () => {
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', paddingLeft: '24px' }}>
                                     <span style={{ fontSize: '11px', color: currentTheme.textSecondary }}>Port:</span>
                                     <span style={{ 
-                                        padding: '2px 6px', 
-                                        backgroundColor: currentTheme.containerFill, 
-                                        border: `1px solid ${currentTheme.containerStroke}`, 
-                                        borderRadius: '4px', 
                                         fontSize: '11px', 
+                                        fontWeight: 600,
                                         color: currentTheme.textPrimary 
                                     }}>
                                         6789
@@ -439,7 +436,7 @@ const App = () => {
                     </div>
                     
                     <div style={sectionTitleStyle}>SELECTED ELEMENTS</div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '350px', overflowY: 'auto' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '500px', overflowY: 'auto' }}>
                         {exportSelection.map((item, index) => (
                             <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px', backgroundColor: currentTheme.bodyFill, borderRadius: '4px', border: `1px solid ${currentTheme.containerStroke}` }}>
                                 <input 
