@@ -205,6 +205,14 @@ const App = () => {
                     return window.btoa(binary);
                 };
 
+                const densitySuffixMap: Record<string, string> = {
+                    mdpi: '@1x',
+                    hdpi: '@1.5x',
+                    xhdpi: '@2x',
+                    xxhdpi: '@3x',
+                    xxxhdpi: '@4x'
+                };
+
                 const payload = {
                     images: images.map((img: any) => ({
                         name: img.name,
@@ -226,33 +234,27 @@ const App = () => {
                         setIsExporting(false);
                         setExportDialogVisible(false);
                         if (res.ok) {
-                            parent.postMessage({ pluginMessage: { type: 'notify', message: 'Successfully exported to Android Studio!' } }, '*');
+                            parent.postMessage({ pluginMessage: { type: 'notify', message: 'Successfully synced assets to Android Studio!' } }, '*');
                         } else {
-                            parent.postMessage({ pluginMessage: { type: 'notify', message: 'Failed to export to Android Studio.' } }, '*');
+                            parent.postMessage({ pluginMessage: { type: 'notify', message: 'Failed to sync assets to Android Studio.' } }, '*');
                         }
                     }).catch(err => {
                         setIsExporting(false);
-                        parent.postMessage({ pluginMessage: { type: 'notify', message: 'Android Studio plugin is not running, please open your project first' } }, '*');
+                        parent.postMessage({ pluginMessage: { type: 'notify', message: 'Android Studio plugin is not running. Please open your project first.' } }, '*');
                     });
                 } else if (exportTargetRef.current === 'local') {
                     import('jszip').then((JSZip) => {
                         const zip = new JSZip.default();
+                        const densitySuffixMap: Record<string, string> = {
+                            mdpi: '@1x',
+                            hdpi: '@1.5x',
+                            xhdpi: '@2x',
+                            xxhdpi: '@3x',
+                            xxxhdpi: '@4x'
+                        };
                         images.forEach((img: any) => {
-                            let folder = '';
-                            if (img.format === 'svg') {
-                                folder = 'drawable';
-                            } else {
-                                const densityFolderMap: Record<string, string> = {
-                                    mdpi: 'drawable-mdpi',
-                                    hdpi: 'drawable-hdpi',
-                                    xhdpi: 'drawable-xhdpi',
-                                    xxhdpi: 'drawable-xxhdpi',
-                                    xxxhdpi: 'drawable-xxxhdpi'
-                                };
-                                folder = densityFolderMap[img.density] || 'drawable';
-                            }
-                            const extension = img.format;
-                            const filename = `${folder}/${img.name}.${extension}`;
+                            const suffix = img.format === 'svg' ? '' : (densitySuffixMap[img.density] || '');
+                            const filename = `${img.name}${suffix}.${img.format}`;
                             zip.file(filename, img.data, { binary: true });
                         });
                         
@@ -261,20 +263,23 @@ const App = () => {
                             const a = document.createElement('a');
                             a.style.display = 'none';
                             a.href = url;
-                            a.download = 'android_assets.zip';
+                            a.download = 'figma_assets.zip';
                             document.body.appendChild(a);
                             a.click();
-                            window.URL.revokeObjectURL(url);
-                            document.body.removeChild(a);
+                            
+                            setTimeout(() => {
+                                window.URL.revokeObjectURL(url);
+                                if (a.parentNode) document.body.removeChild(a);
+                            }, 1000);
                             
                             setIsExporting(false);
                             setExportDialogVisible(false);
-                            parent.postMessage({ pluginMessage: { type: 'notify', message: 'Downloaded assets zip successfully.' } }, '*');
+                            parent.postMessage({ pluginMessage: { type: 'notify', message: 'Downloaded flat assets ZIP successfully.' } }, '*');
                         });
                     }).catch(err => {
                         console.error('Failed to load JSZip', err);
                         setIsExporting(false);
-                        parent.postMessage({ pluginMessage: { type: 'notify', message: 'Failed to create zip file.' } }, '*');
+                        parent.postMessage({ pluginMessage: { type: 'notify', message: 'Failed to create ZIP file.' } }, '*');
                     });
                 }
             }
@@ -365,7 +370,7 @@ const App = () => {
         </div>
     );
 
-    const onConfirmExport = () => {
+    const onConfirmExport = async () => {
         const itemsToExport = exportSelection.filter(s => s.selected).map(s => ({ id: s.id, name: s.name, format: s.format, densities: s.densities }));
         if (itemsToExport.length === 0) return;
         
@@ -406,7 +411,7 @@ const App = () => {
                                     onChange={() => setExportTarget('android_studio')}
                                     style={{ accentColor: '#3DDC84', cursor: 'pointer', width: '14px', height: '14px' }}
                                 />
-                                <span style={{ fontSize: '12px', color: currentTheme.textPrimary }}>Android Studio Plugin (Sync)</span>
+                                <span style={{ fontSize: '12px', color: currentTheme.textPrimary }}>Android Studio Sync</span>
                             </label>
                             
                             {exportTarget === 'android_studio' && (
@@ -431,7 +436,7 @@ const App = () => {
                                 onChange={() => setExportTarget('local')}
                                 style={{ accentColor: '#3DDC84', cursor: 'pointer', width: '14px', height: '14px' }}
                             />
-                            <span style={{ fontSize: '12px', color: currentTheme.textPrimary }}>Download as Zip</span>
+                            <span style={{ fontSize: '12px', color: currentTheme.textPrimary }}>Download Zip</span>
                         </label>
                     </div>
                     
