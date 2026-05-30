@@ -16,6 +16,18 @@
         background-color: var(--figma-color-bg);
         color: var(--figma-color-text);
       }
+      @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+      }
+      @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+      @keyframes slideDown {
+        from { transform: translateY(-4px); opacity: 0; }
+        to { transform: translateY(0); opacity: 1; }
+      }
     </style>
   </head>
   <body>

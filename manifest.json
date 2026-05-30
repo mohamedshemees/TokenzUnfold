@@ -10,9 +10,15 @@
     "capabilities": [],
 "networkAccess": {
     "allowedDomains": [
-        "http://localhost:6789"
+        "http://localhost:6789",
+        "http://localhost:6790",
+        "http://localhost:6791",
+        "http://localhost:6792",
+        "http://localhost:6793",
+        "http://localhost:6794",
+        "http://localhost:6795"
     ],
-    "reasoning": "Communicates only with the local Android Studio plugin on the user's own machine. No external network access."
+    "reasoning": "Communicates only with the local Android Studio plugin instances on the user's own machine. No external network access."
 },
     "documentAccess": "dynamic-page",
     "menu": [

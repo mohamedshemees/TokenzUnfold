@@ -71,6 +71,8 @@ const App = () => {
     const [exportSelection, setExportSelection] = useState<any[]>([]);
     const [exportTarget, setExportTarget] = useState<'android_studio' | 'local'>('android_studio');
     const [exportPort, setExportPort] = useState('6789');
+    const [activePorts, setActivePorts] = useState<string[]>([]);
+    const [isScanning, setIsScanning] = useState(false);
     const [globalExportFormat, setGlobalExportFormat] = useState('PNG');
     const exportTargetRef = React.useRef(exportTarget);
     const exportPortRef = React.useRef(exportPort);
@@ -125,6 +127,44 @@ const App = () => {
     React.useEffect(() => {
         globalExportFormatRef.current = globalExportFormat;
     }, [globalExportFormat]);
+
+    const scanPorts = async () => {
+        setIsScanning(true);
+        const portsToScan = ['6789', '6790', '6791', '6792', '6793', '6794', '6795'];
+        const foundPorts: string[] = [];
+
+        await Promise.all(
+            portsToScan.map(async (port) => {
+                try {
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 1200);
+
+                    await fetch(`http://localhost:${port}/`, {
+                        method: 'GET',
+                        signal: controller.signal,
+                        mode: 'no-cors'
+                    });
+
+                    clearTimeout(timeoutId);
+                    foundPorts.push(port);
+                } catch (e) {
+                    // Ignored (connection refused or timeout)
+                }
+            })
+        );
+
+        foundPorts.sort((a, b) => parseInt(a) - parseInt(b));
+        setActivePorts(foundPorts);
+
+        if (foundPorts.length > 0 && !foundPorts.includes(exportPortRef.current)) {
+            setExportPort(foundPorts[0]);
+        }
+        setIsScanning(false);
+    };
+
+    React.useEffect(() => {
+        scanPorts();
+    }, []);
 
     const onAnnotate = () => {
         parent.postMessage({ pluginMessage: { type: 'annotate-selection', options } }, '*');
@@ -415,15 +455,68 @@ const App = () => {
                             </label>
                             
                             {exportTarget === 'android_studio' && (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', paddingLeft: '24px' }}>
+                                <div style={{ 
+                                    display: 'flex', 
+                                    alignItems: 'center', 
+                                    gap: '8px', 
+                                    paddingLeft: '24px',
+                                    animation: 'fadeIn 0.2s ease-in-out'
+                                }}>
                                     <span style={{ fontSize: '11px', color: currentTheme.textSecondary }}>Port:</span>
-                                    <span style={{ 
-                                        fontSize: '11px', 
-                                        fontWeight: 600,
-                                        color: currentTheme.textPrimary 
-                                    }}>
-                                        6789
-                                    </span>
+                                    <select
+                                        value={exportPort}
+                                        onChange={(e) => setExportPort(e.target.value)}
+                                        style={{ 
+                                            ...inputStyle, 
+                                            padding: '2px 6px', 
+                                            fontSize: '11px', 
+                                            height: '24px', 
+                                            flex: 1,
+                                            minWidth: '100px'
+                                        }}
+                                    >
+                                        {['6789', '6790', '6791', '6792', '6793', '6794', '6795'].map(p => {
+                                            const isActive = activePorts.includes(p);
+                                            return (
+                                                <option key={p} value={p}>
+                                                    {p} {p === '6789' ? '(Default)' : ''} {isActive ? '(Active)' : ''}
+                                                </option>
+                                            );
+                                        })}
+                                    </select>
+                                    
+                                    <button
+                                        onClick={scanPorts}
+                                        disabled={isScanning}
+                                        title="Scan for active ports"
+                                        style={{
+                                            background: 'none',
+                                            border: 'none',
+                                            cursor: isScanning ? 'not-allowed' : 'pointer',
+                                            padding: '2px',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            opacity: isScanning ? 0.5 : 0.8
+                                        }}
+                                    >
+                                        <svg 
+                                            width="12" 
+                                            height="12" 
+                                            viewBox="0 0 24 24" 
+                                            fill="none" 
+                                            stroke={currentTheme.textPrimary} 
+                                            strokeWidth="3" 
+                                            strokeLinecap="round" 
+                                            strokeLinejoin="round"
+                                            style={{ 
+                                                animation: isScanning ? 'spin 1s linear infinite' : 'none',
+                                                transformOrigin: 'center'
+                                            }}
+                                        >
+                                            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+                                        </svg>
+                                    </button>
                                 </div>
                             )}
                         </div>
